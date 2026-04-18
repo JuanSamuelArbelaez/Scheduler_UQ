@@ -208,3 +208,17 @@ El proyecto está listo para una prueba funcional inicial en Telegram con comand
 * Actualizar cita con `/update`
 * Cancelar cita con `/cancel`
 * Ver mensajes naturales luego de cada acción
+
+### Módulo de pruebas
+
+Se añadió un módulo de pruebas automáticas para agentes y bot de Telegram:
+
+* `tests/test_agents.py`
+* `tests/test_telegram_bot.py`
+* `run_tests.py`
+
+Ejecución:
+
+```bash
+python run_tests.py
+```

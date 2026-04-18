@@ -152,6 +152,22 @@ El sistema debe poder interpretar entradas como:
 * Funciones pequeñas y claras
 * Comentarios solo cuando aporten valor
 
+## ✅ Pruebas
+
+Se debe mantener módulo de pruebas para agentes y bot Telegram.
+
+Archivos esperados:
+
+* `tests/test_agents.py`
+* `tests/test_telegram_bot.py`
+* `run_tests.py`
+
+Ejecución recomendada:
+
+```bash
+python run_tests.py
+```
+
 ---
 
 ## 📂 Estructura Esperada
