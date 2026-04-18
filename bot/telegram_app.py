@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import re
-from typing import Any, Final
+from typing import Final
 import unicodedata
 
 from telegram import Update
@@ -16,6 +16,7 @@ from agents.orchestrator import OrchestratorAgent
 from agents.preferences import UserPreferencesAgent
 from agents.scheduling import SchedulingAgent
 from models.entities import Event, User
+from services.local_llm import LocalLlmDecision, LocalOllamaClient
 
 
 USAGE_CREATE: Final[str] = "Uso: /create titulo | YYYY-MM-DDTHH:MM:SS | YYYY-MM-DDTHH:MM:SS | descripcion opcional"
@@ -30,6 +31,7 @@ class TelegramDependencies:
     preferences: UserPreferencesAgent
     notification: NotificationAgent
     history: HistoryAgent
+    llm_client: LocalOllamaClient | None = None
 
 
 @dataclass(slots=True)
@@ -204,6 +206,9 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await message.reply_text(
             "No voy a ejecutar instrucciones peligrosas. Puedo ayudarte con operaciones de agenda y recordatorios."
         )
+        return
+
+    if await _attempt_llm_assisted_flow(update, context, dependencies, user, text):
         return
 
     orchestration = dependencies.orchestrator.handle(text)
@@ -473,6 +478,144 @@ def _build_disambiguation_prompt(action: str, events: list[Event]) -> str:
     for index, event in enumerate(events, start=1):
         lines.append(f"{index}. [{event.id}] {event.title} - {event.start_time:%d/%m/%Y %H:%M}")
     return "\n".join(lines)
+
+
+def _build_llm_context(events: list[Event], user_data: dict[str, object]) -> dict[str, object]:
+    return {
+        "pending_action": user_data.get("pending_action"),
+        "pending_disambiguation": user_data.get("pending_disambiguation"),
+        "events": [
+            {
+                "id": event.id,
+                "title": event.title,
+                "start_time": event.start_time.isoformat(),
+                "end_time": event.end_time.isoformat(),
+                "status": event.status,
+            }
+            for event in events
+        ],
+    }
+
+
+def _build_event_from_llm(decision: LocalLlmDecision, user_id: int) -> Event | None:
+    if not decision.title or not decision.start or not decision.end:
+        return None
+
+    try:
+        start_time = datetime.fromisoformat(decision.start)
+        end_time = datetime.fromisoformat(decision.end)
+    except ValueError:
+        return None
+
+    return Event(
+        id=None,
+        user_id=user_id,
+        title=decision.title,
+        description=decision.description,
+        location=None,
+        start_time=start_time,
+        end_time=end_time,
+        priority=3,
+    )
+
+
+def _select_event_with_llm(decision: LocalLlmDecision, events: list[Event]) -> Event | list[Event] | None:
+    if decision.event_id is not None:
+        for event in events:
+            if event.id == decision.event_id and event.status != "cancelled":
+                return event
+        return None
+
+    query = decision.title_query or decision.title
+    if not query:
+        return None
+
+    return _resolve_event_selection(ParsedCancelRequest(event_id=None, title_query=query), events)
+
+
+async def _attempt_llm_assisted_flow(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    dependencies: TelegramDependencies,
+    user: User,
+    text: str,
+) -> bool:
+    llm_client = dependencies.llm_client
+    message = update.effective_message
+    if llm_client is None or message is None or not llm_client.is_configured():
+        return False
+
+    events = dependencies.scheduling.list_agenda(user.id or 0)
+    decision = llm_client.analyze(text, _build_llm_context(events, context.user_data))
+    if decision is None:
+        return False
+
+    if decision.needs_clarification and decision.clarification:
+        await message.reply_text(decision.clarification)
+        return True
+
+    action = _normalize_text(decision.action)
+    if action == "read":
+        await message.reply_text(dependencies.notification.build_agenda_message(events))
+        return True
+
+    if action == "create":
+        parsed_event = _build_event_from_llm(decision, user.id or 0)
+        if parsed_event is None:
+            return False
+
+        context.user_data["pending_action"] = {
+            "type": "create",
+            "title": parsed_event.title,
+            "start": parsed_event.start_time.isoformat(),
+            "end": parsed_event.end_time.isoformat(),
+            "description": parsed_event.description,
+        }
+        await message.reply_text(
+            f"¿Confirmas crear la cita '{parsed_event.title}' para el {parsed_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+        )
+        return True
+
+    if action in {"update", "cancel"}:
+        selected_event = _select_event_with_llm(decision, events)
+        if selected_event is None:
+            return False
+
+        if isinstance(selected_event, list):
+            context.user_data["pending_disambiguation"] = {
+                "type": action,
+                "event_ids": [event.id for event in selected_event if event.id is not None],
+                "new_start": decision.start,
+            }
+            await message.reply_text(_build_disambiguation_prompt("modificar" if action == "update" else "cancelar", selected_event))
+            return True
+
+        if action == "cancel":
+            context.user_data["pending_action"] = {"type": "cancel", "event_id": selected_event.id}
+            await message.reply_text(
+                f"¿Confirmas cancelar la cita '{selected_event.title}' del {selected_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+            )
+            return True
+
+        if not decision.start:
+            return False
+
+        try:
+            new_start = datetime.fromisoformat(decision.start)
+        except ValueError:
+            return False
+
+        _prepare_pending_update(context, selected_event, new_start)
+        await message.reply_text(
+            f"¿Confirmas mover la cita '{selected_event.title}' al {new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
+        )
+        return True
+
+    if decision.action == "unknown" and decision.clarification:
+        await message.reply_text(decision.clarification)
+        return True
+
+    return False
 
 
 async def _handle_disambiguation_selection(

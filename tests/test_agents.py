@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import unittest
+from unittest.mock import patch
 
 from agents.confirmation import ConfirmationAgent
 from agents.intent import IntentAgent, IntentType
@@ -10,6 +11,7 @@ from agents.notification import NotificationAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.priority import PriorityAgent
 from models.entities import Event, Reminder
+from services.local_llm import LocalOllamaClient
 
 
 class AgentBehaviorTests(unittest.TestCase):
@@ -58,6 +60,51 @@ class AgentBehaviorTests(unittest.TestCase):
         self.assertIn("Reunion de proyecto", create_message)
         self.assertIn("Tu agenda actual es:", agenda_message)
         self.assertIn("Reunion de proyecto", agenda_message)
+
+    def test_local_ollama_client_parses_json_decision(self) -> None:
+        client = LocalOllamaClient("http://localhost:11434", "llama3.1:8b")
+
+        with patch.object(
+            LocalOllamaClient,
+            "_post_json",
+            return_value={
+                "response": '{"action":"create","title":"Reunion","start":"2030-01-01T10:00:00","end":"2030-01-01T11:00:00"}'
+            },
+        ):
+            decision = client.analyze("agenda reunion mañana a las 10")
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.action, "create")
+        self.assertEqual(decision.title, "Reunion")
+        self.assertEqual(decision.start, "2030-01-01T10:00:00")
+
+    def test_local_ollama_client_ignores_when_unconfigured(self) -> None:
+        client = LocalOllamaClient("http://localhost:11434", "")
+        self.assertFalse(client.is_configured())
+        self.assertIsNone(client.analyze("agenda reunion mañana a las 10"))
+
+    def test_local_ollama_client_parses_json_decision(self) -> None:
+        client = LocalOllamaClient("http://localhost:11434", "llama3.1:8b")
+
+        with patch.object(
+            LocalOllamaClient,
+            "_post_json",
+            return_value={
+                "response": '{"action":"create","title":"Reunion","start":"2030-01-01T10:00:00","end":"2030-01-01T11:00:00"}'
+            },
+        ):
+            decision = client.analyze("agenda reunion mañana a las 10")
+
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.action, "create")
+        self.assertEqual(decision.title, "Reunion")
+        self.assertEqual(decision.start, "2030-01-01T10:00:00")
+        self.assertFalse(decision.needs_clarification)
+
+    def test_local_ollama_client_ignores_when_unconfigured(self) -> None:
+        client = LocalOllamaClient("http://localhost:11434", "")
+        self.assertFalse(client.is_configured())
+        self.assertIsNone(client.analyze("agenda reunion mañana a las 10"))
 
 
 if __name__ == "__main__":

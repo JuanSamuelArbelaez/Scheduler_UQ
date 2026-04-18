@@ -6,6 +6,12 @@ El runtime del proyecto utiliza agentes de tipo **simbólico/regla** en Python.
 
 No hay, por ahora, una llamada obligatoria a LLM externo para ejecutar CRUD de agenda.
 
+Opcionalmente, el proyecto puede usar un LLM local vía Ollama para:
+
+* extraer fechas y horas en lenguaje natural
+* resolver ambigüedad en títulos de eventos
+* proponer preguntas de aclaración cuando faltan datos
+
 Esto significa que:
 
 * NLP Agent usa normalización y tokenización simple
@@ -16,10 +22,12 @@ Esto significa que:
 ### Proveedores y versiones en runtime
 
 * Proveedor LLM remoto: ninguno
-* Proveedor LLM local: ninguno por ahora
-* Versión de modelo en runtime: no aplica, porque el flujo operativo actual no depende de un LLM
+* Proveedor LLM local opcional: Ollama
+* Versión de modelo local: configurable por `OLLAMA_MODEL`
+* Modelos sugeridos: `llama3.1:8b`, `qwen2.5:7b-instruct`, `mistral:7b-instruct`
 
-Todo el comportamiento productivo actual es local y determinístico.
+Si `LLM_PROVIDER=ollama` y `OLLAMA_MODEL` está definido, el bot usa ese modelo local como asistente.
+Si no, todo el comportamiento productivo sigue siendo local y determinístico.
 
 ## 2. Modelo usado para desarrollo asistido
 
@@ -46,7 +54,6 @@ pero ese modelo **no forma parte del runtime de producción** del bot.
 
 Si se integra un LLM en runtime, se recomienda:
 
-* agregar proveedor y versión en este archivo
 * preferir un proveedor local cuando el caso de uso permita privacidad/offline
 * separar prompts por agente
 * agregar fallback determinístico ante timeout/errores

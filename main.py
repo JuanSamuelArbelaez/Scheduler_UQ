@@ -15,6 +15,7 @@ from bot.telegram_app import TelegramDependencies, build_application as build_te
 from config.settings import load_settings
 from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
+from services.local_llm import LocalOllamaClient
 
 
 def build_application() -> dict[str, object]:
@@ -39,6 +40,9 @@ def build_application() -> dict[str, object]:
 		reminder_repository,
 		default_reminder_minutes=settings.default_reminder_minutes,
 	)
+	llm_client = None
+	if settings.llm_provider == "ollama":
+		llm_client = LocalOllamaClient(settings.ollama_base_url, settings.ollama_model)
 	preferences_agent = UserPreferencesAgent(user_repository)
 	history_agent = HistoryAgent(history_repository)
 
@@ -62,6 +66,7 @@ def build_application() -> dict[str, object]:
 			"scheduling": scheduling_agent,
 			"preferences": preferences_agent,
 			"history": history_agent,
+			"llm_client": llm_client,
 		},
 	}
 
@@ -97,6 +102,7 @@ def main() -> None:
 			preferences=application["agents"]["preferences"],
 			notification=application["agents"]["notification"],
 			history=application["agents"]["history"],
+			llm_client=application["agents"]["llm_client"],
 		)
 		telegram_application = build_telegram_application(settings.telegram_bot_token, dependencies)
 		print("Iniciando bot de Telegram con mensajes naturales y handlers de agenda.")
