@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import re
 
 from db.repositories import EventRepository, ReminderRepository
 from models.entities import Event, Reminder
@@ -29,6 +30,7 @@ class SchedulerService:
         self.default_reminder_minutes = default_reminder_minutes
 
     def create_event(self, event: Event) -> ActionResult:
+        self._validate_event_text(event)
         self._validate_event_window(event.start_time, event.end_time)
         self._validate_not_in_past(event.start_time)
         self._validate_no_overlap(event.user_id, event.start_time, event.end_time)
@@ -43,6 +45,7 @@ class SchedulerService:
         if event.id is None:
             raise ValueError("Event id is required")
 
+        self._validate_event_text(event)
         existing_event = self.events.get_by_id(event.id)
         self._validate_not_in_past(existing_event.start_time)
         self._validate_event_window(event.start_time, event.end_time)
@@ -77,3 +80,28 @@ class SchedulerService:
     def _validate_no_overlap(self, user_id: int, start_time: datetime, end_time: datetime, exclude_event_id: int | None = None) -> None:
         if self.events.has_overlap(user_id, start_time, end_time, exclude_event_id=exclude_event_id):
             raise ValueError("The event overlaps with an existing event")
+
+    def _validate_event_text(self, event: Event) -> None:
+        self._validate_text_field("title", event.title, max_length=120)
+        self._validate_text_field("description", event.description, max_length=500)
+        self._validate_text_field("location", event.location, max_length=180)
+
+    def _validate_text_field(self, field_name: str, value: str | None, max_length: int) -> None:
+        if value is None:
+            return
+
+        clean_value = value.strip()
+        if not clean_value:
+            if field_name == "title":
+                raise ValueError("Event title cannot be empty")
+            return
+
+        if len(clean_value) > max_length:
+            raise ValueError(f"{field_name} exceeds maximum length")
+
+        suspicious_pattern = re.compile(
+            r"(;|--|/\*|\*/|\bdrop\b|\battach\b|\bpragma\b|\bdelete\s+from\b|\brm\s+-rf\b|\bpowershell\b|\bcmd\.exe\b)",
+            flags=re.IGNORECASE,
+        )
+        if suspicious_pattern.search(clean_value):
+            raise ValueError(f"{field_name} contains disallowed content")

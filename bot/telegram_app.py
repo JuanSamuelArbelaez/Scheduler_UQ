@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 import re
-from typing import Final
+from typing import Any, Final
 import unicodedata
 
 from telegram import Update
@@ -11,10 +11,10 @@ from telegram.ext import Application, ApplicationBuilder, CommandHandler, Contex
 
 from agents.history import HistoryAgent
 from agents.intent import IntentType
+from agents.notification import NotificationAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.preferences import UserPreferencesAgent
 from agents.scheduling import SchedulingAgent
-from agents.notification import NotificationAgent
 from models.entities import Event, User
 
 
@@ -32,12 +32,34 @@ class TelegramDependencies:
     history: HistoryAgent
 
 
+@dataclass(slots=True)
+class ParsedCreateRequest:
+    title: str
+    start_time: datetime
+    end_time: datetime
+    description: str | None
+
+
+@dataclass(slots=True)
+class ParsedUpdateRequest:
+    event_id: int | None
+    title_query: str | None
+    new_start: datetime
+
+
+@dataclass(slots=True)
+class ParsedCancelRequest:
+    event_id: int | None
+    title_query: str | None
+
+
 def build_application(token: str, dependencies: TelegramDependencies) -> Application:
     application = ApplicationBuilder().token(token).concurrent_updates(False).build()
     application.bot_data["dependencies"] = dependencies
 
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("health", health_command))
     application.add_handler(CommandHandler("agenda", agenda_command))
     application.add_handler(CommandHandler("create", create_command))
     application.add_handler(CommandHandler("update", update_command))
@@ -49,7 +71,7 @@ def build_application(token: str, dependencies: TelegramDependencies) -> Applica
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     message = (
-        "Scheduler listo. Puedes usar /agenda, /create, /update y /cancel. "
+        "Scheduler listo. Puedes usar /agenda, /create, /update, /cancel y /health. "
         "Si envias texto libre, intentare clasificarlo con el Orchestrator."
     )
     await update.effective_message.reply_text(message)
@@ -61,7 +83,21 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"{USAGE_CREATE}\n"
         f"{USAGE_UPDATE}\n"
         f"{USAGE_CANCEL}\n"
-        "/agenda"
+        "/agenda\n"
+        "/health"
+    )
+
+
+async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    dependencies = _dependencies(context)
+    db_status = "ok"
+    try:
+        dependencies.scheduling.service.events.connection.execute("SELECT 1").fetchone()
+    except Exception:
+        db_status = "error"
+
+    await update.effective_message.reply_text(
+        f"Health check interno:\n- db: {db_status}\n- bot: running"
     )
 
 
@@ -157,9 +193,18 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user = _ensure_user(update, dependencies)
     text = message.text or ""
 
+    if await _handle_disambiguation_selection(update, context, dependencies, user):
+        return
+
     if _looks_like_confirmation(text):
         if await _handle_confirmation(update, context, dependencies, user):
             return
+
+    if _contains_harmful_prompt(text):
+        await message.reply_text(
+            "No voy a ejecutar instrucciones peligrosas. Puedo ayudarte con operaciones de agenda y recordatorios."
+        )
+        return
 
     orchestration = dependencies.orchestrator.handle(text)
 
@@ -172,7 +217,7 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parsed_create = _parse_natural_create(text)
         if parsed_create is None:
             await message.reply_text(
-                "Puedo crearla si me indicas fecha y hora. Ejemplo: Agenda reunion con Ana mañana a las 15:30"
+                "Puedo crearla si me indicas fecha y hora validas. Ejemplo: Programa reunion con Ana manana a las 15:30"
             )
             return
 
@@ -189,17 +234,27 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
+    events = dependencies.scheduling.list_agenda(user.id or 0)
+
     if orchestration.intent == IntentType.DELETE:
-        parsed_cancel = _parse_natural_cancel(text, dependencies.scheduling.list_agenda(user.id or 0))
-        if parsed_cancel is None:
+        parsed_cancel = _parse_natural_cancel_request(text)
+        selected_event = _resolve_event_selection(parsed_cancel, events)
+        if selected_event is None:
             await message.reply_text(
-                "Para cancelar por texto libre, indica el id o el titulo aproximado de la cita."
+                "Para cancelar por texto libre, indica el id o un titulo aproximado de la cita."
             )
             return
+        if isinstance(selected_event, list):
+            context.user_data["pending_disambiguation"] = {
+                "type": "cancel",
+                "event_ids": [event.id for event in selected_event if event.id is not None],
+            }
+            await message.reply_text(_build_disambiguation_prompt("cancelar", selected_event))
+            return
 
-        context.user_data["pending_action"] = {"type": "cancel", "event_id": parsed_cancel.id}
+        context.user_data["pending_action"] = {"type": "cancel", "event_id": selected_event.id}
         await message.reply_text(
-            f"¿Confirmas cancelar la cita '{parsed_cancel.title}' del {parsed_cancel.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas cancelar la cita '{selected_event.title}' del {selected_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return
 
@@ -207,26 +262,29 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         parsed_update = _parse_natural_update(text)
         if parsed_update is None:
             await message.reply_text(
-                "Para modificar por texto libre necesito el id y la nueva fecha/hora. Ejemplo: mueve la cita 3 a mañana 18:00"
+                "Para modificar por texto libre necesito fecha/hora y el id o titulo de la cita. Ejemplo: mueve reunion equipo a manana 18:00"
             )
             return
 
-        event = dependencies.scheduling.service.events.get_by_id(parsed_update.event_id)
-        duration = event.end_time - event.start_time
-        new_start = parsed_update.new_start
-        new_end = new_start + duration
-        context.user_data["pending_action"] = {
-            "type": "update",
-            "event_id": event.id,
-            "title": event.title,
-            "description": event.description,
-            "location": event.location,
-            "start": new_start.isoformat(),
-            "end": new_end.isoformat(),
-            "priority": event.priority,
-        }
+        selected_event = _resolve_event_selection(
+            ParsedCancelRequest(event_id=parsed_update.event_id, title_query=parsed_update.title_query),
+            events,
+        )
+        if selected_event is None:
+            await message.reply_text("No encontré una cita para modificar con esos datos.")
+            return
+        if isinstance(selected_event, list):
+            context.user_data["pending_disambiguation"] = {
+                "type": "update",
+                "event_ids": [event.id for event in selected_event if event.id is not None],
+                "new_start": parsed_update.new_start.isoformat(),
+            }
+            await message.reply_text(_build_disambiguation_prompt("modificar", selected_event))
+            return
+
+        _prepare_pending_update(context, selected_event, parsed_update.new_start)
         await message.reply_text(
-            f"¿Confirmas mover la cita '{event.title}' al {new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas mover la cita '{selected_event.title}' al {parsed_update.new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return
 
@@ -238,8 +296,14 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     await message.reply_text(
-        "Recibi tu mensaje, pero aun no tengo suficientes datos para ejecutar una accion concreta."
+        "Recibí tu mensaje, pero aún no tengo suficientes datos para ejecutar una acción concreta."
     )
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = "Ocurrió un error inesperado procesando tu solicitud. Inténtalo de nuevo."
+    if isinstance(update, Update) and update.effective_message is not None:
+        await update.effective_message.reply_text(message)
 
 
 def _dependencies(context: ContextTypes.DEFAULT_TYPE) -> TelegramDependencies:
@@ -264,33 +328,13 @@ def _ensure_user(update: Update, dependencies: TelegramDependencies) -> User:
 
 def _split_payload(payload: str, expected_parts: int) -> list[str] | None:
     parts = [part.strip() for part in payload.split("|")]
-    if len(parts) != expected_parts or any(not part for part in parts[:expected_parts - 1]):
+    if len(parts) != expected_parts or any(not part for part in parts[: expected_parts - 1]):
         return None
     return parts
 
 
 def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value)
-
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = "Ocurrió un error inesperado procesando tu solicitud. Inténtalo de nuevo."
-    if isinstance(update, Update) and update.effective_message is not None:
-        await update.effective_message.reply_text(message)
-
-
-@dataclass(slots=True)
-class ParsedCreateRequest:
-    title: str
-    start_time: datetime
-    end_time: datetime
-    description: str | None
-
-
-@dataclass(slots=True)
-class ParsedUpdateRequest:
-    event_id: int
-    new_start: datetime
 
 
 def _parse_natural_create(text: str) -> ParsedCreateRequest | None:
@@ -312,98 +356,185 @@ def _parse_natural_create(text: str) -> ParsedCreateRequest | None:
     if not title:
         return None
 
-    event_date = _resolve_date(day_match.groupdict())
-    event_time = _resolve_time(day_match.group("hour"), day_match.group("minute"), day_match.group("ampm"))
+    try:
+        event_date = _resolve_date(day_match.groupdict())
+        event_time = _resolve_time(day_match.group("hour"), day_match.group("minute"), day_match.group("ampm"))
+    except ValueError:
+        return None
+
     start_time = datetime.combine(event_date, event_time)
     return ParsedCreateRequest(title=title, start_time=start_time, end_time=start_time + timedelta(hours=1), description=None)
 
 
-def _parse_natural_cancel(text: str, events: list[Event]) -> Event | None:
-    id_match = re.search(r"\b(\d+)\b", text)
-    if id_match is not None:
-        event_id = int(id_match.group(1))
-        for event in events:
-            if event.id == event_id and event.status != "cancelled":
-                return event
-
+def _parse_natural_cancel_request(text: str) -> ParsedCancelRequest | None:
     normalized = _normalize_text(text)
-    keywords = {"cancela", "cancelar", "elimina", "borrar", "borra", "anula", "la", "el", "mi", "cita", "evento"}
-    candidate_tokens = [token for token in re.split(r"\W+", normalized) if token and token not in keywords]
-    if not candidate_tokens:
+    id_match = re.search(r"\b(\d+)\b", normalized)
+    if id_match is not None:
+        return ParsedCancelRequest(event_id=int(id_match.group(1)), title_query=None)
+
+    title_match = re.search(r"(?:cancela|cancelar|elimina|borra|anula)\s+(?P<title>.+)$", normalized)
+    if title_match is None:
         return None
 
-    best_event: Event | None = None
-    best_score = 0
-    for event in events:
-        if event.status == "cancelled":
-            continue
-        title_tokens = set(re.split(r"\W+", _normalize_text(event.title)))
-        score = sum(1 for token in candidate_tokens if token in title_tokens)
-        if score > best_score:
-            best_score = score
-            best_event = event
-    return best_event if best_score > 0 else None
+    title_query = _clean_title_query(title_match.group("title"))
+    if not title_query:
+        return None
+    return ParsedCancelRequest(event_id=None, title_query=title_query)
 
 
 def _parse_natural_update(text: str) -> ParsedUpdateRequest | None:
     normalized = _normalize_text(text)
-    id_match = re.search(r"\b(\d+)\b", normalized)
-    if id_match is None:
-        return None
-
-    timing_matches = list(re.finditer(
-        r"(?:a|para)\s+(?:(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
-        normalized,
-    ))
+    timing_matches = list(
+        re.finditer(
+            r"(?:a|para)\s+(?:(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
+            normalized,
+        )
+    )
     if not timing_matches:
         return None
+
     timing_match = timing_matches[-1]
+    try:
+        event_date = _resolve_date(timing_match.groupdict())
+        event_time = _resolve_time(timing_match.group("hour"), timing_match.group("minute"), timing_match.group("ampm"))
+    except ValueError:
+        return None
 
-    event_date = _resolve_date(timing_match.groupdict())
-    event_time = _resolve_time(timing_match.group("hour"), timing_match.group("minute"), timing_match.group("ampm"))
-    return ParsedUpdateRequest(event_id=int(id_match.group(1)), new_start=datetime.combine(event_date, event_time))
+    before_timing = normalized[: timing_match.start()].strip()
+    id_match = re.search(r"\b(\d+)\b", before_timing)
+    if id_match is not None:
+        return ParsedUpdateRequest(
+            event_id=int(id_match.group(1)),
+            title_query=None,
+            new_start=datetime.combine(event_date, event_time),
+        )
+
+    title_match = re.search(r"(?:mueve|cambia|modifica|reprograma|actualiza)\s+(?P<title>.+)$", before_timing)
+    if title_match is None:
+        return None
+
+    title_query = _clean_title_query(title_match.group("title"))
+    if not title_query:
+        return None
+    return ParsedUpdateRequest(
+        event_id=None,
+        title_query=title_query,
+        new_start=datetime.combine(event_date, event_time),
+    )
 
 
-def _resolve_date(values: dict[str, str | None]) -> date:
-    today = datetime.now().date()
-    if values.get("date"):
-        return date.fromisoformat(values["date"] or "")
+def _resolve_event_selection(request: ParsedCancelRequest | None, events: list[Event]) -> Event | list[Event] | None:
+    if request is None:
+        return None
 
-    day_name = _normalize_text(values.get("day") or "")
-    if day_name in {"hoy"}:
-        return today
-    if day_name in {"manana", "mañana"}:
-        return today + timedelta(days=1)
+    if request.event_id is not None:
+        for event in events:
+            if event.id == request.event_id and event.status != "cancelled":
+                return event
+        return None
 
-    weekday_map = {
-        "lunes": 0,
-        "martes": 1,
-        "miercoles": 2,
-        "miércoles": 2,
-        "jueves": 3,
-        "viernes": 4,
-        "sabado": 5,
-        "sábado": 5,
-        "domingo": 6,
+    if not request.title_query:
+        return None
+
+    candidates = _find_event_candidates(request.title_query, events)
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    return candidates[:5]
+
+
+def _find_event_candidates(query: str, events: list[Event]) -> list[Event]:
+    query_tokens = [token for token in re.split(r"\W+", _normalize_text(query)) if token]
+    if not query_tokens:
+        return []
+
+    scored: list[tuple[int, Event]] = []
+    for event in events:
+        if event.status == "cancelled":
+            continue
+        title_tokens = set(re.split(r"\W+", _normalize_text(event.title)))
+        score = sum(1 for token in query_tokens if token in title_tokens)
+        if score > 0:
+            scored.append((score, event))
+
+    scored.sort(key=lambda item: (-item[0], item[1].start_time))
+    return [event for _, event in scored]
+
+
+def _clean_title_query(text: str) -> str:
+    normalized = _normalize_text(text)
+    cleaned = re.sub(r"\b(la|el|mi|cita|evento|de|del)\b", " ", normalized)
+    return " ".join(cleaned.split())
+
+
+def _build_disambiguation_prompt(action: str, events: list[Event]) -> str:
+    lines = [f"Encontré varias citas para {action}. Responde con el número de la opción:"]
+    for index, event in enumerate(events, start=1):
+        lines.append(f"{index}. [{event.id}] {event.title} - {event.start_time:%d/%m/%Y %H:%M}")
+    return "\n".join(lines)
+
+
+async def _handle_disambiguation_selection(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    dependencies: TelegramDependencies,
+    user: User,
+) -> bool:
+    pending = context.user_data.get("pending_disambiguation")
+    message = update.effective_message
+    if pending is None or message is None:
+        return False
+
+    text = (message.text or "").strip()
+    if not text.isdigit():
+        await message.reply_text("Responde con el número de la opción para continuar.")
+        return True
+
+    event_ids = pending.get("event_ids") or []
+    selection = int(text)
+    if selection < 1 or selection > len(event_ids):
+        await message.reply_text(f"La opción debe estar entre 1 y {len(event_ids)}.")
+        return True
+
+    selected_id = int(event_ids[selection - 1])
+    selected_event = dependencies.scheduling.service.events.get_by_id(selected_id)
+    pending_type = pending.get("type")
+
+    if pending_type == "cancel":
+        context.user_data["pending_action"] = {"type": "cancel", "event_id": selected_event.id}
+        context.user_data.pop("pending_disambiguation", None)
+        await message.reply_text(
+            f"¿Confirmas cancelar la cita '{selected_event.title}' del {selected_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+        )
+        return True
+
+    if pending_type == "update":
+        new_start = datetime.fromisoformat(str(pending["new_start"]))
+        _prepare_pending_update(context, selected_event, new_start)
+        context.user_data.pop("pending_disambiguation", None)
+        await message.reply_text(
+            f"¿Confirmas mover la cita '{selected_event.title}' al {new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
+        )
+        return True
+
+    context.user_data.pop("pending_disambiguation", None)
+    await message.reply_text("No encontré una acción pendiente válida.")
+    return True
+
+
+def _prepare_pending_update(context: ContextTypes.DEFAULT_TYPE, event: Event, new_start: datetime) -> None:
+    duration = event.end_time - event.start_time
+    context.user_data["pending_action"] = {
+        "type": "update",
+        "event_id": event.id,
+        "title": event.title,
+        "description": event.description,
+        "location": event.location,
+        "start": new_start.isoformat(),
+        "end": (new_start + duration).isoformat(),
+        "priority": event.priority,
     }
-    if day_name not in weekday_map:
-        return today
-
-    target_weekday = weekday_map[day_name]
-    current_weekday = today.weekday()
-    delta = (target_weekday - current_weekday) % 7
-    return today + timedelta(days=delta)
-
-
-def _resolve_time(hour_raw: str | None, minute_raw: str | None, ampm_raw: str | None) -> time:
-    hour = int(hour_raw or "0")
-    minute = int(minute_raw or "0")
-    ampm = (ampm_raw or "").lower()
-    if ampm == "pm" and hour < 12:
-        hour += 12
-    if ampm == "am" and hour == 12:
-        hour = 0
-    return time(hour=hour, minute=minute)
 
 
 def _looks_like_confirmation(text: str) -> bool:
@@ -475,6 +606,62 @@ async def _handle_confirmation(
     finally:
         context.user_data.pop("pending_action", None)
     return True
+
+
+def _resolve_date(values: dict[str, str | None]) -> date:
+    today = datetime.now().date()
+    if values.get("date"):
+        return date.fromisoformat(values["date"] or "")
+
+    day_name = _normalize_text(values.get("day") or "")
+    if day_name in {"hoy"}:
+        return today
+    if day_name in {"manana", "mañana"}:
+        return today + timedelta(days=1)
+
+    weekday_map = {
+        "lunes": 0,
+        "martes": 1,
+        "miercoles": 2,
+        "miércoles": 2,
+        "jueves": 3,
+        "viernes": 4,
+        "sabado": 5,
+        "sábado": 5,
+        "domingo": 6,
+    }
+    if day_name not in weekday_map:
+        return today
+
+    target_weekday = weekday_map[day_name]
+    current_weekday = today.weekday()
+    delta = (target_weekday - current_weekday) % 7
+    return today + timedelta(days=delta)
+
+
+def _resolve_time(hour_raw: str | None, minute_raw: str | None, ampm_raw: str | None) -> time:
+    hour = int(hour_raw or "0")
+    minute = int(minute_raw or "0")
+    ampm = (ampm_raw or "").lower()
+    if ampm == "pm" and hour < 12:
+        hour += 12
+    if ampm == "am" and hour == 12:
+        hour = 0
+    return time(hour=hour, minute=minute)
+
+
+def _contains_harmful_prompt(text: str) -> bool:
+    normalized = _normalize_text(text)
+    harmful_patterns = (
+        "rm -rf",
+        "powershell",
+        "cmd.exe",
+        "drop table",
+        "delete from",
+        "attach database",
+        "pragma",
+    )
+    return any(pattern in normalized for pattern in harmful_patterns)
 
 
 def _normalize_text(text: str) -> str:

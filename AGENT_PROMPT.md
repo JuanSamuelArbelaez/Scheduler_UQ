@@ -23,6 +23,8 @@ El sistema **Scheduler** es un MSA que:
 * Usa múltiples agentes especializados
 * Mantiene persistencia en SQLite
 
+Los modelos de IA y la estrategia de ejecución están documentados en `AI_MODELS.md`.
+
 El sistema sigue arquitectura **FC-MSA** con capas:
 
 * Physical Network
@@ -88,6 +90,7 @@ Cada agente debe ser independiente:
 * Manejar excepciones explícitamente
 * Nunca romper el flujo del sistema
 * Registrar logs
+* Mantener `/health` operativo para diagnóstico interno
 
 ---
 
@@ -104,6 +107,12 @@ Antes de ejecutar acciones críticas:
 ### 7. Respuestas Naturales
 
 Después de crear, modificar o cancelar una cita, devolver un mensaje en lenguaje natural describiendo la acción realizada.
+
+### 8. Seguridad de Datos
+
+* Usar siempre SQL parametrizado
+* Evitar payloads peligrosos en campos de texto de eventos
+* No ejecutar ni propagar instrucciones destructivas desde prompts de usuario
 
 ---
 

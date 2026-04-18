@@ -150,6 +150,10 @@ Se recomienda mantener un archivo `.env.example` para valores de referencia y no
 * Manejo de fechas relativas
 * Resolución de ambigüedad
 
+Documentación detallada de modelos y enfoque runtime:
+
+* `AI_MODELS.md`
+
 ---
 
 ## 11. Fault Tolerance
@@ -157,6 +161,7 @@ Se recomienda mantener un archivo `.env.example` para valores de referencia y no
 * Logs
 * Reintentos
 * Validación de datos
+* Health check interno al iniciar (`SELECT 1` en DB)
 
 ## 13. Notificaciones Naturales
 
@@ -188,6 +193,7 @@ Comandos soportados en la base actual:
 * `/create titulo | inicio_iso | fin_iso | descripcion`
 * `/update id | titulo | inicio_iso | fin_iso | descripcion`
 * `/cancel id`
+* `/health`
 
 El arranque del polling se controla con `RUN_TELEGRAM_BOT=true`.
 
@@ -211,6 +217,8 @@ También incluye flujo conversacional por lenguaje natural con confirmación exp
 * Cancelar cita con `/cancel`
 * Ver mensajes naturales luego de cada acción
 * Crear/modificar/cancelar por texto libre con confirmación "si/no"
+* Resolver desambiguación por opciones numeradas cuando hay títulos parecidos
+* Validar `/health` y estado `db: ok`
 
 ### Módulo de pruebas
 
@@ -226,6 +234,17 @@ Cobertura actual del módulo de pruebas:
 * Formato de notificaciones
 * Parsing de lenguaje natural (create/update/cancel)
 * Flujo conversacional end-to-end (texto libre -> confirmación -> ejecución)
+* Casos ambiguos (selección por número)
+* Errores de formato hora/fecha
+
+## 15. Seguridad DB y Entradas
+
+Controles activos:
+
+* Consultas SQL parametrizadas en repositorios
+* Restricción de operaciones SQLite peligrosas (`ATTACH`, `DROP`, `PRAGMA`, `ALTER`) vía authorizer
+* Validación de campos de evento para bloquear patrones riesgosos en texto
+* Bloqueo de prompts peligrosos en flujo de lenguaje natural del bot
 
 Ejecución:
 

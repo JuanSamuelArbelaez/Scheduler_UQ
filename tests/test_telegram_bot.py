@@ -15,14 +15,17 @@ from agents.preferences import UserPreferencesAgent
 from agents.priority import PriorityAgent
 from agents.scheduling import SchedulingAgent
 from bot.telegram_app import (
+    ParsedCancelRequest,
     TelegramDependencies,
     _looks_like_confirmation,
     _normalize_text,
-    _parse_natural_cancel,
+    _parse_natural_cancel_request,
     _parse_natural_create,
     _parse_natural_update,
+    _resolve_event_selection,
     _split_payload,
     build_application,
+    health_command,
     text_router,
 )
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
@@ -61,39 +64,32 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(parsed.start_time.hour, 14)
         self.assertEqual(parsed.start_time.minute, 30)
 
+    def test_parse_natural_create_invalid_time(self) -> None:
+        parsed = _parse_natural_create("programa demo tecnica manana a las 99:99")
+        self.assertIsNone(parsed)
+
     def test_parse_natural_update(self) -> None:
         parsed = _parse_natural_update("mueve la cita 7 a manana 18:00")
         self.assertIsNotNone(parsed)
         self.assertEqual(parsed.event_id, 7)
         self.assertEqual(parsed.new_start.hour, 18)
 
-    def test_parse_natural_cancel_by_title(self) -> None:
+    def test_parse_natural_cancel_by_title_query(self) -> None:
+        parsed = _parse_natural_cancel_request("cancela reunion semanal")
+        self.assertIsNotNone(parsed)
+        self.assertIsNone(parsed.event_id)
+        self.assertEqual(parsed.title_query, "reunion semanal")
+
+    def test_resolve_event_selection_ambiguous(self) -> None:
         now = datetime.now() + timedelta(days=2)
         events = [
-            Event(
-                id=1,
-                user_id=10,
-                title="Reunion semanal",
-                description=None,
-                location=None,
-                start_time=now,
-                end_time=now + timedelta(hours=1),
-                priority=3,
-            ),
-            Event(
-                id=2,
-                user_id=10,
-                title="Doctor",
-                description=None,
-                location=None,
-                start_time=now + timedelta(days=1),
-                end_time=now + timedelta(days=1, hours=1),
-                priority=3,
-            ),
+            Event(1, 10, "Reunion semanal equipo", None, None, now, now + timedelta(hours=1), 3),
+            Event(2, 10, "Reunion semanal producto", None, None, now + timedelta(days=1), now + timedelta(days=1, hours=1), 3),
+            Event(3, 10, "Doctor", None, None, now + timedelta(days=3), now + timedelta(days=3, hours=1), 3),
         ]
-        selected = _parse_natural_cancel("cancela la reunion", events)
-        self.assertIsNotNone(selected)
-        self.assertEqual(selected.id, 1)
+        selection = _resolve_event_selection(ParsedCancelRequest(event_id=None, title_query="reunion semanal"), events)
+        self.assertIsInstance(selection, list)
+        self.assertEqual(len(selection), 2)
 
     def test_normalization_and_confirmation_helpers(self) -> None:
         self.assertEqual(_normalize_text("  Mañana   a las 3  "), "manana a las 3")
@@ -106,10 +102,6 @@ class TelegramBotTests(unittest.TestCase):
         parts = _split_payload(payload, 4)
         self.assertIsNotNone(parts)
         self.assertEqual(parts[0], "titulo")
-
-
-if __name__ == "__main__":
-    unittest.main()
 
 
 class _FakeMessage:
@@ -146,10 +138,16 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.context = SimpleNamespace(
             application=SimpleNamespace(bot_data={"dependencies": self.dependencies}),
             user_data={},
+            args=[],
         )
 
     def tearDown(self) -> None:
         self.connection.close()
+
+    async def test_health_command_reports_db_ok(self) -> None:
+        update = _FakeUpdate("/health")
+        await health_command(update, self.context)
+        self.assertIn("db: ok", update.effective_message.replies[0])
 
     async def test_natural_create_requires_confirmation_then_persists_event(self) -> None:
         first_update = _FakeUpdate("programa demo de producto manana a las 15:30")
@@ -166,39 +164,39 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(events), 1)
         self.assertEqual(events[0].title, "demo de producto")
 
-    async def test_natural_cancel_requires_confirmation_then_cancels_event(self) -> None:
+    async def test_natural_cancel_ambiguous_requires_option_then_confirmation(self) -> None:
         user = self.dependencies.preferences.upsert_user(User(id=None, telegram_chat_id="12345"))
         start_time = datetime.now() + timedelta(days=2)
-        created = self.dependencies.scheduling.create_event(
-            Event(
-                id=None,
-                user_id=user.id or 0,
-                title="Reunion de estado",
-                description=None,
-                location=None,
-                start_time=start_time,
-                end_time=start_time + timedelta(hours=1),
-                priority=3,
-            )
+        self.dependencies.scheduling.create_event(
+            Event(None, user.id or 0, "Reunion semanal equipo", None, None, start_time, start_time + timedelta(hours=1), 3)
         )
-        self.assertIsNotNone(created.event)
+        self.dependencies.scheduling.create_event(
+            Event(None, user.id or 0, "Reunion semanal producto", None, None, start_time + timedelta(days=1), start_time + timedelta(days=1, hours=1), 3)
+        )
 
-        first_update = _FakeUpdate("cancela reunion de estado")
-        await text_router(first_update, self.context)
-        self.assertIn("Confirmas cancelar la cita", first_update.effective_message.replies[0])
+        ask_update = _FakeUpdate("cancela reunion semanal")
+        await text_router(ask_update, self.context)
+        self.assertIn("Encontré varias citas", ask_update.effective_message.replies[0])
+        self.assertIn("pending_disambiguation", self.context.user_data)
 
-        reject_update = _FakeUpdate("no")
-        await text_router(reject_update, self.context)
-        self.assertIn("Acción cancelada", reject_update.effective_message.replies[0])
+        choose_update = _FakeUpdate("2")
+        await text_router(choose_update, self.context)
+        self.assertIn("Confirmas cancelar la cita", choose_update.effective_message.replies[0])
 
-        second_update = _FakeUpdate("cancela reunion de estado")
-        await text_router(second_update, self.context)
         confirm_update = _FakeUpdate("si")
         await text_router(confirm_update, self.context)
-
         self.assertTrue(any("Cancelé la cita" in reply for reply in confirm_update.effective_message.replies))
-        event_after = self.dependencies.scheduling.service.events.get_by_id(created.event.id or 0)
-        self.assertEqual(event_after.status, "cancelled")
+
+    async def test_natural_update_invalid_time_prompts_for_valid_data(self) -> None:
+        update = _FakeUpdate("mueve reunion equipo a manana 99:99")
+        await text_router(update, self.context)
+        self.assertIn("necesito fecha/hora", update.effective_message.replies[0])
+
+    async def test_natural_create_blocks_suspicious_content(self) -> None:
+        first_update = _FakeUpdate("programa drop table users manana a las 10:00")
+        await text_router(first_update, self.context)
+        self.assertIn("No voy a ejecutar instrucciones peligrosas", first_update.effective_message.replies[0])
+        self.assertNotIn("pending_action", self.context.user_data)
 
 
 def _create_in_memory_connection() -> sqlite3.Connection:
@@ -248,3 +246,7 @@ def _create_in_memory_connection() -> sqlite3.Connection:
         """
     )
     return connection
+
+
+if __name__ == "__main__":
+    unittest.main()

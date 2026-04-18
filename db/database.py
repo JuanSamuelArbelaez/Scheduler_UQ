@@ -3,7 +3,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from pathlib import Path
 import sqlite3
-from typing import Iterator
+from typing import Callable, Iterator
 
 
 class Database:
@@ -14,6 +14,9 @@ class Database:
         connection = sqlite3.connect(self.path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
+        connection.execute("PRAGMA trusted_schema = OFF")
+        connection.enable_load_extension(False)
+        connection.set_authorizer(self._build_authorizer())
         return connection
 
     def initialize(self) -> None:
@@ -70,3 +73,37 @@ class Database:
             except Exception:
                 connection.rollback()
                 raise
+
+    def _build_authorizer(self) -> Callable[[int, str | None, str | None, str | None, str | None], int]:
+        blocked_action_names = (
+            "SQLITE_ATTACH",
+            "SQLITE_DETACH",
+            "SQLITE_DROP_TABLE",
+            "SQLITE_DROP_INDEX",
+            "SQLITE_DROP_VIEW",
+            "SQLITE_DROP_TRIGGER",
+            "SQLITE_DROP_TEMP_TABLE",
+            "SQLITE_DROP_TEMP_INDEX",
+            "SQLITE_DROP_TEMP_VIEW",
+            "SQLITE_DROP_TEMP_TRIGGER",
+            "SQLITE_ALTER_TABLE",
+            "SQLITE_PRAGMA",
+        )
+        blocked_actions = {
+            getattr(sqlite3, action_name)
+            for action_name in blocked_action_names
+            if hasattr(sqlite3, action_name)
+        }
+
+        def authorizer(
+            action: int,
+            _arg1: str | None,
+            _arg2: str | None,
+            _db_name: str | None,
+            _trigger_name: str | None,
+        ) -> int:
+            if action in blocked_actions:
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        return authorizer

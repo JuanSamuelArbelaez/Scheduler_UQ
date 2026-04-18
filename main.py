@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from agents.confirmation import ConfirmationAgent
 from agents.history import HistoryAgent
 from agents.intent import IntentAgent
@@ -64,9 +66,25 @@ def build_application() -> dict[str, object]:
 	}
 
 
+def run_internal_health_check(application: dict[str, Any]) -> tuple[bool, str]:
+	try:
+		connection = application["connection"]
+		connection.execute("SELECT 1").fetchone()
+	except Exception as error:
+		return False, f"db error: {error}"
+
+	return True, "db ok"
+
+
 def main() -> None:
 	application = build_application()
 	settings = application["settings"]
+	health_ok, health_message = run_internal_health_check(application)
+	print(f"Health check interno: {health_message}")
+	if not health_ok:
+		print("Deteniendo inicio por fallo en health check interno.")
+		return
+
 	if settings.telegram_bot_token is None:
 		print("TELEGRAM_BOT_TOKEN no esta configurado. Solo se inicializo la base local.")
 		print("El sistema ya esta preparado para devolver mensajes naturales tras agendar, modificar o cancelar citas.")
