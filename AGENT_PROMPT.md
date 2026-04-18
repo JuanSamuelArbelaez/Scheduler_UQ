@@ -74,6 +74,7 @@ Cada agente debe ser independiente:
 
 * Cargar `.env` en desarrollo si existe, pero no versionarlo.
 * Usar `RUN_TELEGRAM_BOT` para controlar si el bot entra en polling.
+* Si `LLM_PROVIDER=ollama`, verificar que Ollama y el modelo configurado estén disponibles antes de iniciar polling.
 
 ---
 
@@ -141,6 +142,12 @@ El sistema debe poder interpretar entradas como:
 * "Mueve mi cita a las 4"
 * "Agrega descripción a mi evento"
 * "Cancela mi cita"
+* "Cambiar mi correo en preferencias"
+* "Mi zona horaria es UTC-5"
+
+Nota de operación:
+
+* Intent Agent debe usar LLM local como clasificador por defecto cuando esté habilitado, con fallback a reglas por keywords ante errores o `unknown`.
 
 ---
 

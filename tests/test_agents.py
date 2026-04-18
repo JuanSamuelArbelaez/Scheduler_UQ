@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from agents.confirmation import ConfirmationAgent
 from agents.intent import IntentAgent, IntentType
@@ -20,8 +20,31 @@ class AgentBehaviorTests(unittest.TestCase):
 
         self.assertEqual(intent_agent.classify("programa cita con juan"), IntentType.CREATE)
         self.assertEqual(intent_agent.classify("que tengo manana"), IntentType.READ)
+        self.assertEqual(
+            intent_agent.classify(
+                "crea una cita para ir el sabado 6 de junio de 2026 al cine, a las 8 pm. voy a ir a ver digital circus"
+            ),
+            IntentType.CREATE,
+        )
         self.assertEqual(intent_agent.classify("mueve mi cita"), IntentType.UPDATE)
         self.assertEqual(intent_agent.classify("cancela mi cita"), IntentType.DELETE)
+        self.assertEqual(intent_agent.classify("quiero configurar mi correo electronico asociado"), IntentType.PREFERENCES)
+        self.assertEqual(intent_agent.classify("cambiar mi correo en preferencias"), IntentType.PREFERENCES)
+
+    def test_intent_agent_uses_ollama_when_available(self) -> None:
+        llm_client = Mock()
+        llm_client.classify_intent.return_value = "preferences"
+        intent_agent = IntentAgent(llm_client=llm_client)
+
+        self.assertEqual(intent_agent.classify("quiero configurar mi correo"), IntentType.PREFERENCES)
+        llm_client.classify_intent.assert_called_once()
+
+    def test_intent_agent_falls_back_when_ollama_returns_unknown(self) -> None:
+        llm_client = Mock()
+        llm_client.classify_intent.return_value = "unknown"
+        intent_agent = IntentAgent(llm_client=llm_client)
+
+        self.assertEqual(intent_agent.classify("cambiar mi correo en preferencias"), IntentType.PREFERENCES)
 
     def test_orchestrator_builds_consistent_result(self) -> None:
         orchestrator = OrchestratorAgent(

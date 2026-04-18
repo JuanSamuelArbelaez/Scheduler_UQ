@@ -2,11 +2,14 @@
 
 ## 1. Estado actual del runtime
 
-El runtime del proyecto utiliza agentes de tipo **simbólico/regla** en Python.
+El runtime del proyecto utiliza un enfoque **híbrido**:
 
-No hay, por ahora, una llamada obligatoria a LLM externo para ejecutar CRUD de agenda.
+* clasificación de intención con LLM local (cuando `LLM_PROVIDER=ollama`)
+* fallback determinístico por reglas para mantener resiliencia
 
-Opcionalmente, el proyecto puede usar un LLM local vía Ollama para:
+No hay llamada obligatoria a proveedor remoto.
+
+El proyecto usa LLM local vía Ollama para:
 
 * extraer fechas y horas en lenguaje natural
 * resolver ambigüedad en títulos de eventos
@@ -15,7 +18,7 @@ Opcionalmente, el proyecto puede usar un LLM local vía Ollama para:
 Esto significa que:
 
 * NLP Agent usa normalización y tokenización simple
-* Intent Agent usa clasificación por palabras clave
+* Intent Agent usa LLM primero y fallback por palabras clave si el LLM falla o devuelve `unknown`
 * Priority Agent usa reglas por palabras de urgencia
 * Confirmation Agent usa reglas de negocio para confirmar acciones críticas
 
@@ -26,8 +29,10 @@ Esto significa que:
 * Versión de modelo local: configurable por `OLLAMA_MODEL`
 * Modelos sugeridos: `llama3.1:8b`, `qwen2.5:7b-instruct`, `mistral:7b-instruct`
 
-Si `LLM_PROVIDER=ollama` y `OLLAMA_MODEL` está definido, el bot usa ese modelo local como asistente.
-Si no, todo el comportamiento productivo sigue siendo local y determinístico.
+Si `LLM_PROVIDER=ollama` y `OLLAMA_MODEL` está definido, el arranque del bot valida que Ollama esté disponible y que el modelo exista antes de iniciar polling.
+Si esa validación falla, el bot no inicia para evitar inconsistencias en clasificación.
+
+Si `LLM_PROVIDER` no es `ollama`, el sistema funciona solo con lógica determinística.
 
 ## 2. Modelo usado para desarrollo asistido
 
@@ -42,7 +47,7 @@ pero ese modelo **no forma parte del runtime de producción** del bot.
 
 * Orchestrator Agent: lógica determinística de orquestación
 * NLP Agent: normalización textual y parsing por reglas
-* Intent Agent: heurísticas por keywords
+* Intent Agent: LLM local por defecto (si está habilitado) + heurísticas por keywords como fallback
 * Scheduling Agent: validaciones de negocio y operación CRUD
 * Priority Agent: scoring de prioridad por reglas
 * Notification Agent: plantillas de lenguaje natural

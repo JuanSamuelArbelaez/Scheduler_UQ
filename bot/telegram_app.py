@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta, timezone
 import re
 from typing import Final
 import unicodedata
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from telegram import Update
 from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
@@ -32,6 +33,7 @@ class TelegramDependencies:
     notification: NotificationAgent
     history: HistoryAgent
     llm_client: LocalOllamaClient | None = None
+    default_timezone: str = "America/Bogota"
 
 
 @dataclass(slots=True)
@@ -68,13 +70,20 @@ def build_application(token: str, dependencies: TelegramDependencies) -> Applica
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     application.add_error_handler(error_handler)
+    if application.job_queue is not None:
+        application.job_queue.run_repeating(_email_reminder_job, interval=60, first=20)
     return application
 
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    dependencies = _dependencies(context)
+    user = _ensure_user(update, dependencies)
+    onboarding_hint = "Te voy a pedir tu email y zona horaria para activar recordatorios por correo."
+    if user.email and dependencies.preferences.has_configured_timezone(user):
+        onboarding_hint = "Tus preferencias ya están configuradas."
     message = (
         "Scheduler listo. Puedes usar /agenda, /create, /update, /cancel y /health. "
-        "Si envias texto libre, intentare clasificarlo con el Orchestrator."
+        f"Si envias texto libre, intentare clasificarlo con el Orchestrator. {onboarding_hint}"
     )
     await update.effective_message.reply_text(message)
 
@@ -106,13 +115,20 @@ async def health_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def agenda_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     dependencies = _dependencies(context)
     user = _ensure_user(update, dependencies)
+    if await _handle_onboarding(update, context, dependencies, user):
+        return
+
+    timezone_name = dependencies.preferences.get_timezone(user)
     events = dependencies.scheduling.list_agenda(user.id or 0)
-    await update.effective_message.reply_text(dependencies.notification.build_agenda_message(events))
+    await update.effective_message.reply_text(dependencies.notification.build_agenda_message(events, timezone_name))
 
 
 async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     dependencies = _dependencies(context)
     user = _ensure_user(update, dependencies)
+    if await _handle_onboarding(update, context, dependencies, user):
+        return
+
     payload = " ".join(context.args)
     parts = _split_payload(payload, 4)
     if parts is None:
@@ -121,14 +137,17 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         title, start_raw, end_raw, description = parts
+        user_timezone = dependencies.preferences.get_timezone(user)
+        start_local = _parse_datetime(start_raw)
+        end_local = _parse_datetime(end_raw)
         event = Event(
             id=None,
             user_id=user.id or 0,
             title=title,
             description=description,
             location=None,
-            start_time=_parse_datetime(start_raw),
-            end_time=_parse_datetime(end_raw),
+            start_time=_to_utc_datetime(start_local, user_timezone),
+            end_time=_to_utc_datetime(end_local, user_timezone),
             priority=3,
         )
         result = dependencies.scheduling.create_event(event)
@@ -141,6 +160,9 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     dependencies = _dependencies(context)
     user = _ensure_user(update, dependencies)
+    if await _handle_onboarding(update, context, dependencies, user):
+        return
+
     payload = " ".join(context.args)
     parts = _split_payload(payload, 5)
     if parts is None:
@@ -149,14 +171,17 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
     try:
         event_id_raw, title, start_raw, end_raw, description = parts
+        user_timezone = dependencies.preferences.get_timezone(user)
+        start_local = _parse_datetime(start_raw)
+        end_local = _parse_datetime(end_raw)
         event = Event(
             id=int(event_id_raw),
             user_id=user.id or 0,
             title=title,
             description=description,
             location=None,
-            start_time=_parse_datetime(start_raw),
-            end_time=_parse_datetime(end_raw),
+            start_time=_to_utc_datetime(start_local, user_timezone),
+            end_time=_to_utc_datetime(end_local, user_timezone),
             priority=3,
         )
         result = dependencies.scheduling.update_event(event)
@@ -171,6 +196,9 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     dependencies = _dependencies(context)
     user = _ensure_user(update, dependencies)
+    if await _handle_onboarding(update, context, dependencies, user):
+        return
+
     payload = " ".join(context.args).strip()
     if not payload.isdigit():
         await update.effective_message.reply_text(USAGE_CANCEL)
@@ -195,6 +223,11 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user = _ensure_user(update, dependencies)
     text = message.text or ""
 
+    if await _handle_onboarding(update, context, dependencies, user):
+        return
+
+    user_timezone = dependencies.preferences.get_timezone(user)
+
     if await _handle_disambiguation_selection(update, context, dependencies, user):
         return
 
@@ -215,22 +248,37 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if orchestration.intent == IntentType.READ:
         events = dependencies.scheduling.list_agenda(user.id or 0)
-        await message.reply_text(dependencies.notification.build_agenda_message(events))
+        await message.reply_text(dependencies.notification.build_agenda_message(events, user_timezone))
+        return
+
+    if orchestration.intent == IntentType.PREFERENCES:
+        if _apply_preference_updates(text, dependencies, user):
+            updated_user = dependencies.preferences.get_user(user.telegram_chat_id)
+            updated_timezone = dependencies.preferences.get_timezone(updated_user)
+            await message.reply_text(
+                f"Preferencias actualizadas. Email: {updated_user.email or 'sin configurar'}. UTC/Zona horaria: {updated_timezone}."
+            )
+            return
+        await message.reply_text(
+            "Puedo actualizar tus preferencias. Ejemplos: 'mi correo es nombre@dominio.com' o 'mi zona horaria es America/Bogota'."
+        )
         return
 
     if orchestration.intent == IntentType.CREATE:
-        parsed_create = _parse_natural_create(text)
+        parsed_create = _parse_natural_create(text, reference_now=_now_in_timezone(user_timezone))
         if parsed_create is None:
             await message.reply_text(
                 "Puedo crearla si me indicas fecha y hora validas. Ejemplo: Programa reunion con Ana manana a las 15:30"
             )
             return
 
+        start_utc = _to_utc_datetime(parsed_create.start_time, user_timezone)
+        end_utc = _to_utc_datetime(parsed_create.end_time, user_timezone)
         pending = {
             "type": "create",
             "title": parsed_create.title,
-            "start": parsed_create.start_time.isoformat(),
-            "end": parsed_create.end_time.isoformat(),
+            "start": start_utc.isoformat(),
+            "end": end_utc.isoformat(),
             "description": parsed_create.description,
         }
         context.user_data["pending_action"] = pending
@@ -258,13 +306,14 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         context.user_data["pending_action"] = {"type": "cancel", "event_id": selected_event.id}
+        local_start = _to_user_timezone(selected_event.start_time, user_timezone)
         await message.reply_text(
-            f"¿Confirmas cancelar la cita '{selected_event.title}' del {selected_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas cancelar la cita '{selected_event.title}' del {local_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return
 
     if orchestration.intent == IntentType.UPDATE:
-        parsed_update = _parse_natural_update(text)
+        parsed_update = _parse_natural_update(text, reference_now=_now_in_timezone(user_timezone))
         if parsed_update is None:
             await message.reply_text(
                 "Para modificar por texto libre necesito fecha/hora y el id o titulo de la cita. Ejemplo: mueve reunion equipo a manana 18:00"
@@ -287,7 +336,7 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await message.reply_text(_build_disambiguation_prompt("modificar", selected_event))
             return
 
-        _prepare_pending_update(context, selected_event, parsed_update.new_start)
+        _prepare_pending_update(context, selected_event, _to_utc_datetime(parsed_update.new_start, user_timezone))
         await message.reply_text(
             f"¿Confirmas mover la cita '{selected_event.title}' al {parsed_update.new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
@@ -311,6 +360,11 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.effective_message.reply_text(message)
 
 
+async def _email_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    dependencies = _dependencies(context)
+    dependencies.scheduling.dispatch_due_reminders()
+
+
 def _dependencies(context: ContextTypes.DEFAULT_TYPE) -> TelegramDependencies:
     return context.application.bot_data["dependencies"]
 
@@ -331,6 +385,170 @@ def _ensure_user(update: Update, dependencies: TelegramDependencies) -> User:
     return user
 
 
+async def _handle_onboarding(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+    dependencies: TelegramDependencies,
+    user: User,
+) -> bool:
+    message = update.effective_message
+    if message is None:
+        return False
+
+    text = (message.text or "").strip()
+    pending = context.user_data.get("pending_onboarding")
+
+    if pending is None and user.email and dependencies.preferences.has_configured_timezone(user):
+        return False
+
+    if pending is None:
+        initial_step = "email" if not user.email else "timezone"
+        context.user_data["pending_onboarding"] = {"step": initial_step}
+        if initial_step == "email" and not _extract_email(text):
+            await message.reply_text(
+                "Antes de continuar, configura tu correo para notificaciones. Escribe algo como: mi correo es nombre@dominio.com"
+            )
+            return True
+        if initial_step == "timezone" and _extract_timezone(text, dependencies.default_timezone) is None:
+            await message.reply_text(
+                "Antes de continuar, configura tu zona horaria. Ejemplo: America/Bogota o UTC-5"
+            )
+            return True
+        pending = context.user_data.get("pending_onboarding")
+
+    step = str(pending.get("step") or "")
+    if step == "email":
+        extracted_email = _extract_email(text)
+        if not extracted_email:
+            await message.reply_text("No detecté un correo válido. Ejemplo: mi correo es nombre@dominio.com")
+            return True
+
+        updated_user = dependencies.preferences.update_email(user, extracted_email)
+        timezone_name = _extract_timezone(text, dependencies.default_timezone)
+        if timezone_name is not None:
+            updated_user = dependencies.preferences.update_timezone(updated_user, timezone_name)
+            context.user_data.pop("pending_onboarding", None)
+            await message.reply_text(
+                f"Configuración completada. Email: {updated_user.email or 'sin email'}. Zona horaria: {dependencies.preferences.get_timezone(updated_user)}."
+            )
+            return True
+
+        context.user_data["pending_onboarding"] = {"step": "timezone"}
+        await message.reply_text(
+            f"Correo guardado: {updated_user.email}. Ahora configura tu zona horaria (ejemplo: America/Bogota o UTC-5)."
+        )
+        return True
+
+    if step == "timezone":
+        timezone_name = _extract_timezone(text, dependencies.default_timezone)
+        if timezone_name is None:
+            await message.reply_text(
+                "No reconocí la zona horaria. Usa formato IANA (America/Bogota) o UTC±N (UTC-5)."
+            )
+            return True
+
+        updated_user = dependencies.preferences.update_timezone(user, timezone_name)
+        context.user_data.pop("pending_onboarding", None)
+        await message.reply_text(
+            f"Configuración completada. Email: {updated_user.email or 'sin email'}. Zona horaria: {dependencies.preferences.get_timezone(updated_user)}."
+        )
+        return True
+
+    context.user_data.pop("pending_onboarding", None)
+    return False
+
+
+def _apply_preference_updates(text: str, dependencies: TelegramDependencies, user: User) -> bool:
+    changed = False
+    email = _extract_email(text)
+    if email:
+        user = dependencies.preferences.update_email(user, email)
+        changed = True
+
+    timezone_name = _extract_timezone(text, dependencies.default_timezone)
+    if timezone_name:
+        dependencies.preferences.update_timezone(user, timezone_name)
+        changed = True
+
+    return changed
+
+
+def _extract_email(text: str) -> str | None:
+    match = re.search(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", text)
+    if match is None:
+        return None
+    return match.group(0).strip()
+
+
+def _extract_timezone(text: str, default_timezone: str) -> str | None:
+    normalized = text.strip()
+    if not normalized:
+        return None
+
+    utc_match = re.search(r"\butc\s*([+-])\s*(\d{1,2})\b", normalized, flags=re.IGNORECASE)
+    if utc_match:
+        sign = -1 if utc_match.group(1) == "-" else 1
+        hours = int(utc_match.group(2))
+        offset = sign * hours
+        mapping = {
+            -5: "America/Bogota",
+            -6: "America/Guatemala",
+            -4: "America/La_Paz",
+            0: "UTC",
+            1: "Europe/Madrid",
+        }
+        return mapping.get(offset, default_timezone)
+
+    lowered = _normalize_text(normalized)
+    if "colombia" in lowered or "bogota" in lowered:
+        return "America/Bogota"
+
+    match = re.search(r"\b([A-Za-z_]+/[A-Za-z_]+)\b", normalized)
+    if match:
+        candidate = match.group(1)
+        return candidate
+    return None
+
+
+def _to_utc_datetime(value: datetime, timezone_name: str) -> datetime:
+    user_zone = _resolve_timezone(timezone_name)
+
+    if value.tzinfo is None:
+        localized = value.replace(tzinfo=user_zone)
+    else:
+        localized = value.astimezone(user_zone)
+    return localized.astimezone(UTC)
+
+
+def _to_user_timezone(value: datetime, timezone_name: str) -> datetime:
+    user_zone = _resolve_timezone(timezone_name)
+
+    source = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
+    return source.astimezone(user_zone)
+
+
+def _now_in_timezone(timezone_name: str) -> datetime:
+    zone = _resolve_timezone(timezone_name)
+    return datetime.now(zone)
+
+
+def _resolve_timezone(timezone_name: str) -> timezone | ZoneInfo:
+    try:
+        return ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        lowered = _normalize_text(timezone_name)
+        if lowered in {"america/bogota", "bogota", "colombia", "utc-5"}:
+            return timezone(timedelta(hours=-5))
+        if lowered in {"utc", "etc/utc", "utc+0", "gmt"}:
+            return timezone.utc
+        utc_match = re.match(r"^utc([+-])(\d{1,2})$", lowered)
+        if utc_match:
+            sign = -1 if utc_match.group(1) == "-" else 1
+            hours = int(utc_match.group(2))
+            return timezone(timedelta(hours=sign * hours))
+        return timezone(timedelta(hours=-5))
+
+
 def _split_payload(payload: str, expected_parts: int) -> list[str] | None:
     parts = [part.strip() for part in payload.split("|")]
     if len(parts) != expected_parts or any(not part for part in parts[: expected_parts - 1]):
@@ -342,15 +560,20 @@ def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
-def _parse_natural_create(text: str) -> ParsedCreateRequest | None:
+def _parse_natural_create(text: str, reference_now: datetime | None = None) -> ParsedCreateRequest | None:
     normalized = _normalize_text(text)
     day_match = re.search(
-        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+(?:a\s+las\s+|a\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
+        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+(?:a\s+las\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
         normalized,
     )
     if day_match is None:
         day_match = re.search(
-            r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<date>\d{4}-\d{2}-\d{2})\s+(?:a\s+las\s+|a\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
+            r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<date>\d{4}-\d{2}-\d{2})\s+(?:a\s+las\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
+            normalized,
+        )
+    if day_match is None:
+        day_match = re.search(
+            r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?:(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+)?(?P<day_num>\d{1,2})\s+de\s+(?P<month_name>enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(?P<year>\d{4})(?P<between>.*?)\s*(?:a\s+las\s+|a\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
             normalized,
         )
 
@@ -358,11 +581,15 @@ def _parse_natural_create(text: str) -> ParsedCreateRequest | None:
         return None
 
     title = day_match.group("title").strip(" .,")
+    between = (day_match.groupdict().get("between") or "").strip(" .,")
+    if between:
+        title = f"{title} {between}".strip()
+    title = _clean_create_title(title)
     if not title:
         return None
 
     try:
-        event_date = _resolve_date(day_match.groupdict())
+        event_date = _resolve_date(day_match.groupdict(), reference_now=reference_now)
         event_time = _resolve_time(day_match.group("hour"), day_match.group("minute"), day_match.group("ampm"))
     except ValueError:
         return None
@@ -387,7 +614,7 @@ def _parse_natural_cancel_request(text: str) -> ParsedCancelRequest | None:
     return ParsedCancelRequest(event_id=None, title_query=title_query)
 
 
-def _parse_natural_update(text: str) -> ParsedUpdateRequest | None:
+def _parse_natural_update(text: str, reference_now: datetime | None = None) -> ParsedUpdateRequest | None:
     normalized = _normalize_text(text)
     timing_matches = list(
         re.finditer(
@@ -400,7 +627,7 @@ def _parse_natural_update(text: str) -> ParsedUpdateRequest | None:
 
     timing_match = timing_matches[-1]
     try:
-        event_date = _resolve_date(timing_match.groupdict())
+        event_date = _resolve_date(timing_match.groupdict(), reference_now=reference_now)
         event_time = _resolve_time(timing_match.group("hour"), timing_match.group("minute"), timing_match.group("ampm"))
     except ValueError:
         return None
@@ -546,6 +773,7 @@ async def _attempt_llm_assisted_flow(
         return False
 
     events = dependencies.scheduling.list_agenda(user.id or 0)
+    user_timezone = dependencies.preferences.get_timezone(user)
     decision = llm_client.analyze(text, _build_llm_context(events, context.user_data))
     if decision is None:
         return False
@@ -556,13 +784,19 @@ async def _attempt_llm_assisted_flow(
 
     action = _normalize_text(decision.action)
     if action == "read":
-        await message.reply_text(dependencies.notification.build_agenda_message(events))
+        if _looks_like_explicit_create(text):
+            return False
+        await message.reply_text(dependencies.notification.build_agenda_message(events, user_timezone))
         return True
 
     if action == "create":
         parsed_event = _build_event_from_llm(decision, user.id or 0)
         if parsed_event is None:
             return False
+
+        parsed_event.start_time = _to_utc_datetime(parsed_event.start_time, user_timezone)
+        parsed_event.end_time = _to_utc_datetime(parsed_event.end_time, user_timezone)
+        local_start = _to_user_timezone(parsed_event.start_time, user_timezone)
 
         context.user_data["pending_action"] = {
             "type": "create",
@@ -572,7 +806,7 @@ async def _attempt_llm_assisted_flow(
             "description": parsed_event.description,
         }
         await message.reply_text(
-            f"¿Confirmas crear la cita '{parsed_event.title}' para el {parsed_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas crear la cita '{parsed_event.title}' para el {local_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return True
 
@@ -582,18 +816,25 @@ async def _attempt_llm_assisted_flow(
             return False
 
         if isinstance(selected_event, list):
+            pending_new_start = None
+            if decision.start:
+                try:
+                    pending_new_start = _to_utc_datetime(datetime.fromisoformat(decision.start), user_timezone).isoformat()
+                except ValueError:
+                    pending_new_start = None
             context.user_data["pending_disambiguation"] = {
                 "type": action,
                 "event_ids": [event.id for event in selected_event if event.id is not None],
-                "new_start": decision.start,
+                "new_start": pending_new_start,
             }
             await message.reply_text(_build_disambiguation_prompt("modificar" if action == "update" else "cancelar", selected_event))
             return True
 
         if action == "cancel":
             context.user_data["pending_action"] = {"type": "cancel", "event_id": selected_event.id}
+            local_start = _to_user_timezone(selected_event.start_time, user_timezone)
             await message.reply_text(
-                f"¿Confirmas cancelar la cita '{selected_event.title}' del {selected_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+                f"¿Confirmas cancelar la cita '{selected_event.title}' del {local_start:%d/%m/%Y a las %H:%M}? Responde si o no."
             )
             return True
 
@@ -605,9 +846,11 @@ async def _attempt_llm_assisted_flow(
         except ValueError:
             return False
 
-        _prepare_pending_update(context, selected_event, new_start)
+        new_start_utc = _to_utc_datetime(new_start, user_timezone)
+        _prepare_pending_update(context, selected_event, new_start_utc)
+        local_start = _to_user_timezone(new_start_utc, user_timezone)
         await message.reply_text(
-            f"¿Confirmas mover la cita '{selected_event.title}' al {new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas mover la cita '{selected_event.title}' al {local_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return True
 
@@ -643,21 +886,29 @@ async def _handle_disambiguation_selection(
     selected_id = int(event_ids[selection - 1])
     selected_event = dependencies.scheduling.service.events.get_by_id(selected_id)
     pending_type = pending.get("type")
+    user_timezone = dependencies.preferences.get_timezone(user)
 
     if pending_type == "cancel":
         context.user_data["pending_action"] = {"type": "cancel", "event_id": selected_event.id}
         context.user_data.pop("pending_disambiguation", None)
+        local_start = _to_user_timezone(selected_event.start_time, user_timezone)
         await message.reply_text(
-            f"¿Confirmas cancelar la cita '{selected_event.title}' del {selected_event.start_time:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas cancelar la cita '{selected_event.title}' del {local_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return True
 
     if pending_type == "update":
-        new_start = datetime.fromisoformat(str(pending["new_start"]))
+        new_start_raw = pending.get("new_start")
+        if not new_start_raw:
+            context.user_data.pop("pending_disambiguation", None)
+            await message.reply_text("Me falta la nueva fecha/hora para completar la modificación.")
+            return True
+        new_start = datetime.fromisoformat(str(new_start_raw))
         _prepare_pending_update(context, selected_event, new_start)
         context.user_data.pop("pending_disambiguation", None)
+        local_start = _to_user_timezone(new_start, user_timezone)
         await message.reply_text(
-            f"¿Confirmas mover la cita '{selected_event.title}' al {new_start:%d/%m/%Y a las %H:%M}? Responde si o no."
+            f"¿Confirmas mover la cita '{selected_event.title}' al {local_start:%d/%m/%Y a las %H:%M}? Responde si o no."
         )
         return True
 
@@ -751,10 +1002,30 @@ async def _handle_confirmation(
     return True
 
 
-def _resolve_date(values: dict[str, str | None]) -> date:
-    today = datetime.now().date()
+def _resolve_date(values: dict[str, str | None], reference_now: datetime | None = None) -> date:
+    today = (reference_now or datetime.now()).date()
     if values.get("date"):
         return date.fromisoformat(values["date"] or "")
+    if values.get("day_num") and values.get("month_name") and values.get("year"):
+        month_map = {
+            "enero": 1,
+            "febrero": 2,
+            "marzo": 3,
+            "abril": 4,
+            "mayo": 5,
+            "junio": 6,
+            "julio": 7,
+            "agosto": 8,
+            "septiembre": 9,
+            "setiembre": 9,
+            "octubre": 10,
+            "noviembre": 11,
+            "diciembre": 12,
+        }
+        month_value = month_map.get(_normalize_text(values["month_name"] or ""))
+        if month_value is None:
+            raise ValueError("invalid month")
+        return date(year=int(values["year"] or "0"), month=month_value, day=int(values["day_num"] or "0"))
 
     day_name = _normalize_text(values.get("day") or "")
     if day_name in {"hoy"}:
@@ -805,6 +1076,20 @@ def _contains_harmful_prompt(text: str) -> bool:
         "pragma",
     )
     return any(pattern in normalized for pattern in harmful_patterns)
+
+
+def _clean_create_title(text: str) -> str:
+    cleaned = text
+    cleaned = re.sub(r"^(una\s+)?cita\s+para\s+", "", cleaned).strip()
+    cleaned = re.sub(r"^(un\s+)?evento\s+para\s+", "", cleaned).strip()
+    cleaned = re.sub(r"^para\s+", "", cleaned).strip()
+    cleaned = re.sub(r"\b(voy\s+a\s+ir|ire|ir)\b", "", cleaned).strip(" .,")
+    return " ".join(cleaned.split())
+
+
+def _looks_like_explicit_create(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return bool(re.search(r"\b(crea|crear|programa|agenda|agendar|agrega|anade|anadir|añade|cita)\b", normalized))
 
 
 def _normalize_text(text: str) -> str:

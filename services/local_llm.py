@@ -67,6 +67,78 @@ class LocalOllamaClient:
             clarification=_optional_str(data.get("clarification")),
         )
 
+    def classify_intent(self, text: str) -> str | None:
+        if not self.is_configured():
+            return None
+
+        prompt = (
+            "Clasifica la intencion de este texto para una agenda. "
+            "Devuelve solo JSON valido con la forma {\"intent\":\"create|read|update|delete|preferences|unknown\"}. "
+            f"Texto: {text}"
+        )
+
+        try:
+            response = self._post_json(
+                "/api/generate",
+                {
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "format": "json",
+                },
+            )
+        except (URLError, TimeoutError, ValueError):
+            return None
+
+        payload = response.get("response") if isinstance(response, dict) else None
+        if not isinstance(payload, str):
+            return None
+
+        try:
+            data = json.loads(payload)
+        except json.JSONDecodeError:
+            return None
+
+        intent = data.get("intent") if isinstance(data, dict) else None
+        if not isinstance(intent, str):
+            return None
+        return intent.strip().lower() or None
+
+    def list_models(self) -> list[str] | None:
+        try:
+            response = self._post_json("/api/tags", {})
+        except (URLError, TimeoutError, ValueError):
+            return None
+
+        models_raw = response.get("models") if isinstance(response, dict) else None
+        if not isinstance(models_raw, list):
+            return []
+
+        models: list[str] = []
+        for item in models_raw:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name")
+            if isinstance(name, str) and name.strip():
+                models.append(name.strip())
+        return models
+
+    def ensure_ready(self) -> tuple[bool, str]:
+        if not self.is_configured():
+            return False, "OLLAMA_MODEL no está configurado"
+
+        models = self.list_models()
+        if models is None:
+            return False, "No se pudo conectar con Ollama"
+
+        if self.model in models:
+            return True, f"Ollama listo con modelo {self.model}"
+
+        return False, (
+            f"El modelo configurado '{self.model}' no está disponible en Ollama. "
+            f"Modelos detectados: {', '.join(models) if models else 'ninguno'}"
+        )
+
     def _build_prompt(self, text: str, context: dict[str, Any]) -> str:
         return (
             "Eres un asistente para una agenda. Devuelve JSON valido y solo JSON. "

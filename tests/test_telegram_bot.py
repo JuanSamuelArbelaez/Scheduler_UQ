@@ -30,6 +30,7 @@ from bot.telegram_app import (
 )
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
 from models.entities import Event, User
+from services.email_service import EmailService, EmailSettings
 
 
 class TelegramBotTests(unittest.TestCase):
@@ -43,7 +44,13 @@ class TelegramBotTests(unittest.TestCase):
 
         self.dependencies = TelegramDependencies(
             orchestrator=OrchestratorAgent(NLPAgent(), IntentAgent(), PriorityAgent(), ConfirmationAgent()),
-            scheduling=SchedulingAgent(events, reminders, default_reminder_minutes=15),
+            scheduling=SchedulingAgent(
+                events,
+                reminders,
+                users,
+                EmailService(EmailSettings(host="", port=587, username="", password="", from_email="")),
+                default_reminder_minutes=15,
+            ),
             preferences=UserPreferencesAgent(users),
             notification=NotificationAgent(),
             history=HistoryAgent(history),
@@ -67,6 +74,17 @@ class TelegramBotTests(unittest.TestCase):
     def test_parse_natural_create_invalid_time(self) -> None:
         parsed = _parse_natural_create("programa demo tecnica manana a las 99:99")
         self.assertIsNone(parsed)
+
+    def test_parse_natural_create_long_spanish_date(self) -> None:
+        parsed = _parse_natural_create(
+            "crea una cita para ir el sabado 6 de junio de 2026 al cine, a las 8 pm. voy a ir a ver digital circus con un amigo"
+        )
+        self.assertIsNotNone(parsed)
+        self.assertEqual(parsed.start_time.year, 2026)
+        self.assertEqual(parsed.start_time.month, 6)
+        self.assertEqual(parsed.start_time.day, 6)
+        self.assertEqual(parsed.start_time.hour, 20)
+        self.assertIn("cine", parsed.title)
 
     def test_parse_natural_update(self) -> None:
         parsed = _parse_natural_update("mueve la cita 7 a manana 18:00")
@@ -130,7 +148,13 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
 
         self.dependencies = TelegramDependencies(
             orchestrator=OrchestratorAgent(NLPAgent(), IntentAgent(), PriorityAgent(), ConfirmationAgent()),
-            scheduling=SchedulingAgent(events, reminders, default_reminder_minutes=15),
+            scheduling=SchedulingAgent(
+                events,
+                reminders,
+                users,
+                EmailService(EmailSettings(host="", port=587, username="", password="", from_email="")),
+                default_reminder_minutes=15,
+            ),
             preferences=UserPreferencesAgent(users),
             notification=NotificationAgent(),
             history=HistoryAgent(history),
@@ -139,6 +163,14 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
             application=SimpleNamespace(bot_data={"dependencies": self.dependencies}),
             user_data={},
             args=[],
+        )
+        self.dependencies.preferences.upsert_user(
+            User(
+                id=None,
+                telegram_chat_id="12345",
+                email="qa@example.com",
+                preferences={"timezone": "America/Bogota"},
+            )
         )
 
     def tearDown(self) -> None:
@@ -165,7 +197,7 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events[0].title, "demo de producto")
 
     async def test_natural_cancel_ambiguous_requires_option_then_confirmation(self) -> None:
-        user = self.dependencies.preferences.upsert_user(User(id=None, telegram_chat_id="12345"))
+        user = self.dependencies.preferences.get_user("12345")
         start_time = datetime.now() + timedelta(days=2)
         self.dependencies.scheduling.create_event(
             Event(None, user.id or 0, "Reunion semanal equipo", None, None, start_time, start_time + timedelta(hours=1), 3)
@@ -197,6 +229,24 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         await text_router(first_update, self.context)
         self.assertIn("No voy a ejecutar instrucciones peligrosas", first_update.effective_message.replies[0])
         self.assertNotIn("pending_action", self.context.user_data)
+
+    async def test_onboarding_requests_email_and_timezone_for_new_user(self) -> None:
+        update_email_prompt = _FakeUpdate("hola", chat_id=999)
+        await text_router(update_email_prompt, self.context)
+        self.assertIn("configura tu correo", update_email_prompt.effective_message.replies[0])
+
+        update_email_value = _FakeUpdate("mi correo es nuevo@ejemplo.com", chat_id=999)
+        await text_router(update_email_value, self.context)
+        self.assertIn("Ahora configura tu zona horaria", update_email_value.effective_message.replies[0])
+
+        update_timezone_value = _FakeUpdate("UTC-5", chat_id=999)
+        await text_router(update_timezone_value, self.context)
+        self.assertIn("Configuración completada", update_timezone_value.effective_message.replies[0])
+
+    async def test_preferences_message_updates_email(self) -> None:
+        update = _FakeUpdate("quiero configurar mi correo: cambio@dominio.com")
+        await text_router(update, self.context)
+        self.assertIn("Preferencias actualizadas", update.effective_message.replies[0])
 
 
 def _create_in_memory_connection() -> sqlite3.Connection:
@@ -230,6 +280,8 @@ def _create_in_memory_connection() -> sqlite3.Connection:
             event_id INTEGER NOT NULL,
             remind_at TEXT NOT NULL,
             channel TEXT NOT NULL DEFAULT 'telegram',
+            sent_at TEXT,
+            delivery_status TEXT,
             FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
         );
 

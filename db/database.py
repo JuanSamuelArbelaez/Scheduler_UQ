@@ -20,7 +20,7 @@ class Database:
         return connection
 
     def initialize(self) -> None:
-        with self.connect() as connection:
+        with sqlite3.connect(self.path) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -48,6 +48,8 @@ class Database:
                     event_id INTEGER NOT NULL,
                     remind_at TEXT NOT NULL,
                     channel TEXT NOT NULL DEFAULT 'telegram',
+                    sent_at TEXT,
+                    delivery_status TEXT,
                     FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
                 );
 
@@ -63,6 +65,9 @@ class Database:
                 );
                 """
             )
+            self._ensure_column(connection, "reminders", "sent_at", "TEXT")
+            self._ensure_column(connection, "reminders", "delivery_status", "TEXT")
+            connection.commit()
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
@@ -102,8 +107,22 @@ class Database:
             _db_name: str | None,
             _trigger_name: str | None,
         ) -> int:
+            if hasattr(sqlite3, "SQLITE_PRAGMA") and action == sqlite3.SQLITE_PRAGMA:
+                pragma_name = (_arg1 or "").lower()
+                if pragma_name in {"table_info"}:
+                    return sqlite3.SQLITE_OK
+            if hasattr(sqlite3, "SQLITE_ALTER_TABLE") and action == sqlite3.SQLITE_ALTER_TABLE:
+                if (_arg1 or "").lower() == "reminders":
+                    return sqlite3.SQLITE_OK
             if action in blocked_actions:
                 return sqlite3.SQLITE_DENY
             return sqlite3.SQLITE_OK
 
         return authorizer
+
+    def _ensure_column(self, connection: sqlite3.Connection, table_name: str, column_name: str, column_type: str) -> None:
+        rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        existing_columns = {row[1] for row in rows}
+        if column_name in existing_columns:
+            return
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")

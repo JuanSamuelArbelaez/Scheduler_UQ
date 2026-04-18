@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 import re
 
-from db.repositories import EventRepository, ReminderRepository
+from db.repositories import EventRepository, ReminderRepository, UserRepository
 from models.entities import Event, Reminder
 from agents.notification import NotificationAgent
+from services.email_service import EmailService
 
 
 @dataclass(slots=True)
@@ -21,12 +22,18 @@ class SchedulerService:
         self,
         events: EventRepository,
         reminders: ReminderRepository,
+        users: UserRepository,
         notification: NotificationAgent,
+        email_service: EmailService,
+        default_timezone: str = "America/Bogota",
         default_reminder_minutes: int = 15,
     ) -> None:
         self.events = events
         self.reminders = reminders
+        self.users = users
         self.notification = notification
+        self.email_service = email_service
+        self.default_timezone = default_timezone
         self.default_reminder_minutes = default_reminder_minutes
 
     def create_event(self, event: Event) -> ActionResult:
@@ -38,7 +45,9 @@ class SchedulerService:
         created_event = self.events.create(event)
         reminder = self._build_default_reminder(created_event)
         created_reminder = self.reminders.create(reminder)
-        message = self.notification.build_creation_message(created_event, created_reminder)
+        timezone_name = self._get_user_timezone(created_event.user_id)
+        message = self.notification.build_creation_message(created_event, created_reminder, timezone_name)
+        self._notify_action_email("create", created_event, timezone_name)
         return ActionResult(created_event, created_reminder, message)
 
     def update_event(self, event: Event) -> ActionResult:
@@ -51,14 +60,18 @@ class SchedulerService:
         self._validate_event_window(event.start_time, event.end_time)
         self._validate_no_overlap(event.user_id, event.start_time, event.end_time, exclude_event_id=event.id)
         updated_event = self.events.update(event)
-        message = self.notification.build_update_message(updated_event)
+        timezone_name = self._get_user_timezone(updated_event.user_id)
+        message = self.notification.build_update_message(updated_event, timezone_name)
+        self._notify_action_email("update", updated_event, timezone_name)
         return ActionResult(updated_event, None, message)
 
     def cancel_event(self, event_id: int) -> ActionResult:
         existing_event = self.events.get_by_id(event_id)
         self._validate_not_in_past(existing_event.start_time)
         self.events.cancel(event_id)
-        message = self.notification.build_cancellation_message(existing_event)
+        timezone_name = self._get_user_timezone(existing_event.user_id)
+        message = self.notification.build_cancellation_message(existing_event, timezone_name)
+        self._notify_action_email("cancel", existing_event, timezone_name)
         return ActionResult(existing_event, None, message)
 
     def list_agenda(self, user_id: int) -> list[Event]:
@@ -68,12 +81,51 @@ class SchedulerService:
         remind_at = event.start_time - timedelta(minutes=self.default_reminder_minutes)
         return Reminder(id=None, event_id=event.id or 0, remind_at=remind_at)
 
+    def dispatch_due_reminders(self, now_utc: datetime | None = None) -> int:
+        current_time = now_utc or datetime.now(UTC)
+        if current_time.tzinfo is None:
+            current_time = current_time.replace(tzinfo=UTC)
+
+        due_reminders = self.reminders.list_due_unsent(current_time)
+        sent_count = 0
+        for row in due_reminders:
+            reminder_id = int(row["reminder_id"])
+            event = Event(
+                id=int(row["event_id"]),
+                user_id=int(row["user_id"]),
+                title=str(row["event_title"]),
+                description=None,
+                location=None,
+                start_time=row["event_start_time"],
+                end_time=row["event_start_time"] + timedelta(hours=1),
+                priority=3,
+            )
+            user_email = str(row.get("user_email") or "").strip()
+            user_preferences = row.get("user_preferences") or {}
+            timezone_name = str(user_preferences.get("timezone") or self.default_timezone)
+
+            sent = False
+            if user_email:
+                subject = self.notification.build_reminder_email_subject(event)
+                body = self.notification.build_reminder_email_body(event, timezone_name)
+                sent = self.email_service.send_email(user_email, subject, body)
+
+            delivery_status = "email_sent" if sent else "skipped_or_failed"
+            self.reminders.mark_delivery(reminder_id, delivery_status)
+            if sent:
+                sent_count += 1
+
+        return sent_count
+
     def _validate_event_window(self, start_time: datetime, end_time: datetime) -> None:
         if end_time <= start_time:
             raise ValueError("Event end_time must be after start_time")
 
     def _validate_not_in_past(self, start_time: datetime) -> None:
-        now = datetime.now(start_time.tzinfo) if start_time.tzinfo is not None else datetime.now()
+        if start_time.tzinfo is None:
+            now = datetime.now()
+        else:
+            now = datetime.now(start_time.tzinfo)
         if start_time < now:
             raise ValueError("Past events cannot be modified or created")
 
@@ -105,3 +157,25 @@ class SchedulerService:
         )
         if suspicious_pattern.search(clean_value):
             raise ValueError(f"{field_name} contains disallowed content")
+
+    def _get_user_timezone(self, user_id: int) -> str:
+        try:
+            user = self.users.get_by_id(user_id)
+        except LookupError:
+            return self.default_timezone
+        timezone_name = str(user.preferences.get("timezone") or "").strip()
+        return timezone_name or self.default_timezone
+
+    def _notify_action_email(self, action: str, event: Event, timezone_name: str) -> None:
+        try:
+            user = self.users.get_by_id(event.user_id)
+        except LookupError:
+            return
+
+        email = (user.email or "").strip()
+        if not email:
+            return
+
+        subject = self.notification.build_action_email_subject(action, event)
+        body = self.notification.build_action_email_body(action, event, timezone_name)
+        self.email_service.send_email(email, subject, body)

@@ -15,6 +15,7 @@ from bot.telegram_app import TelegramDependencies, build_application as build_te
 from config.settings import load_settings
 from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
+from services.email_service import EmailService, EmailSettings
 from services.local_llm import LocalOllamaClient
 
 
@@ -30,20 +31,33 @@ def build_application() -> dict[str, object]:
 	history_repository = HistoryRepository(connection)
 
 	nlp_agent = NLPAgent()
-	intent_agent = IntentAgent()
+	llm_client = None
+	if settings.llm_provider == "ollama":
+		llm_client = LocalOllamaClient(settings.ollama_base_url, settings.ollama_model)
+	intent_agent = IntentAgent(llm_client=llm_client)
 	priority_agent = PriorityAgent()
 	confirmation_agent = ConfirmationAgent()
 	notification_agent = NotificationAgent()
 	orchestrator_agent = OrchestratorAgent(nlp_agent, intent_agent, priority_agent, confirmation_agent)
+	email_service = EmailService(
+		EmailSettings(
+			host=settings.smtp_host,
+			port=settings.smtp_port,
+			username=settings.smtp_username,
+			password=settings.smtp_password,
+			from_email=settings.smtp_from_email,
+			use_tls=settings.smtp_use_tls,
+		)
+	)
 	scheduling_agent = SchedulingAgent(
 		event_repository,
 		reminder_repository,
+		user_repository,
+		email_service,
+		default_timezone=settings.default_timezone,
 		default_reminder_minutes=settings.default_reminder_minutes,
 	)
-	llm_client = None
-	if settings.llm_provider == "ollama":
-		llm_client = LocalOllamaClient(settings.ollama_base_url, settings.ollama_model)
-	preferences_agent = UserPreferencesAgent(user_repository)
+	preferences_agent = UserPreferencesAgent(user_repository, default_timezone=settings.default_timezone)
 	history_agent = HistoryAgent(history_repository)
 
 	return {
@@ -67,6 +81,7 @@ def build_application() -> dict[str, object]:
 			"preferences": preferences_agent,
 			"history": history_agent,
 			"llm_client": llm_client,
+			"email_service": email_service,
 		},
 	}
 
@@ -95,7 +110,22 @@ def main() -> None:
 		print("El sistema ya esta preparado para devolver mensajes naturales tras agendar, modificar o cancelar citas.")
 		return
 
-	if settings.run_telegram_bot:
+	if settings.llm_provider == "ollama":
+		llm_client = application["agents"]["llm_client"]
+		if llm_client is None:
+			print("LLM_PROVIDER=ollama, pero no se pudo construir el cliente local.")
+			print("Deteniendo inicio para evitar comportamiento inconsistente del Intent Agent.")
+			return
+
+		ready, message = llm_client.ensure_ready()
+		print(f"Verificación Ollama: {message}")
+		if not ready:
+			print("Deteniendo inicio hasta que Ollama esté operativo y con el modelo configurado.")
+			return
+
+	if settings.run_telegram_bot or settings.telegram_bot_token is not None:
+		if not settings.run_telegram_bot:
+			print("RUN_TELEGRAM_BOT no estaba activo, pero se iniciara el bot porque existe token configurado.")
 		dependencies = TelegramDependencies(
 			orchestrator=application["agents"]["orchestrator"],
 			scheduling=application["agents"]["scheduling"],
@@ -103,6 +133,7 @@ def main() -> None:
 			notification=application["agents"]["notification"],
 			history=application["agents"]["history"],
 			llm_client=application["agents"]["llm_client"],
+			default_timezone=settings.default_timezone,
 		)
 		telegram_application = build_telegram_application(settings.telegram_bot_token, dependencies)
 		print("Iniciando bot de Telegram con mensajes naturales y handlers de agenda.")

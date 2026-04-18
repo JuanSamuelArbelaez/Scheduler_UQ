@@ -8,6 +8,9 @@ Scheduler es un sistema multiagente para gestionar agendas por Telegram con leng
 - Pedir confirmación antes de acciones críticas
 - Resolver ambigüedades por texto libre
 - Funcionar con fallback por reglas si no hay LLM local disponible
+- Clasificar intenciones con Ollama (incluye preferencias como email/UTC)
+- Enviar correos por acción (crear, actualizar, cancelar) y recordatorios por email
+- Configurar zona horaria por usuario (default: Colombia)
 - Ejecutar un health check interno al iniciar
 
 ## Requisitos
@@ -27,6 +30,7 @@ TELEGRAM_BOT_TOKEN=tu_token
 TELEGRAM_BOT_URL=https://t.me/uq_scheduler_bot
 SQLITE_PATH=scheduler.db
 DEFAULT_REMINDER_MINUTES=15
+DEFAULT_TIMEZONE=America/Bogota
 RUN_TELEGRAM_BOT=true
 ```
 
@@ -48,6 +52,26 @@ Puedes usar otro modelo local compatible con Ollama, por ejemplo:
 
 Si el modelo no está disponible o Ollama no responde, el bot vuelve al flujo determinístico por reglas.
 
+## Correo y recordatorios
+
+Configura SMTP para activar notificaciones y recordatorios por email:
+
+```bash
+SMTP_HOST=smtp.tu-proveedor.com
+SMTP_PORT=587
+SMTP_USERNAME=usuario
+SMTP_PASSWORD=clave
+SMTP_FROM_EMAIL=bot@tu-dominio.com
+SMTP_USE_TLS=true
+```
+
+Con SMTP activo, el sistema envía correo cuando:
+
+- Se crea una cita
+- Se actualiza una cita
+- Se cancela una cita
+- Se dispara un recordatorio
+
 ## Instalación
 
 Instala dependencias:
@@ -68,23 +92,26 @@ python main.py
 
 ### Modo bot Telegram
 
-Activa el polling del bot:
+Activa el polling del bot. Si `TELEGRAM_BOT_TOKEN` está configurado, `main.py` inicia el bot automáticamente:
 
 ```bash
 python main.py
 ```
 
-Asegúrate de tener `RUN_TELEGRAM_BOT=true` en `.env`.
+Asegúrate de tener `TELEGRAM_BOT_TOKEN` en `.env`. `RUN_TELEGRAM_BOT=true` sigue siendo válido, pero ya no es obligatorio si hay token.
 
 ## Probar en Telegram
 
 1. Abre el bot configurado en Telegram.
 2. Envía `/start`.
-3. Prueba con texto natural:
+3. En el primer contacto, configura email y zona horaria cuando el bot lo solicite.
+4. Prueba con texto natural:
    - `programa reunion con ana manana a las 15:30`
    - `cancela reunion semanal`
    - `mueve la cita 3 a manana 18:00`
-4. Responde `si`, `no` o el número de opción si el sistema pide desambiguación.
+   - `quiero configurar mi correo electrónico asociado: correo@dominio.com`
+   - `mi zona horaria es UTC-5`
+5. Responde `si`, `no` o el número de opción si el sistema pide desambiguación.
 
 ## Pruebas
 

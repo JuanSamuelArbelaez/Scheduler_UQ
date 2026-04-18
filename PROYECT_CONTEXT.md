@@ -130,6 +130,11 @@ Variables usadas actualmente:
 * `TELEGRAM_BOT_TOKEN` → token del bot
 * `TELEGRAM_BOT_URL` → URL pública del bot
 * `RUN_TELEGRAM_BOT` → habilita el polling del bot en desarrollo
+* `LLM_PROVIDER` → proveedor de LLM (`ollama` o `none`)
+* `OLLAMA_BASE_URL` → URL del runtime local de Ollama
+* `OLLAMA_MODEL` → modelo local requerido para intención/soporte NL
+* `DEFAULT_TIMEZONE` → zona horaria por defecto
+* `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS` → correo saliente SMTP
 
 Se recomienda mantener un archivo `.env.example` para valores de referencia y no versionar `.env`.
 
@@ -149,6 +154,12 @@ Se recomienda mantener un archivo `.env.example` para valores de referencia y no
 * Interpretación de lenguaje natural
 * Manejo de fechas relativas
 * Resolución de ambigüedad
+* Clasificación de intención con Ollama como primera opción (fallback por reglas)
+
+Regla operativa actual:
+
+* Si `LLM_PROVIDER=ollama`, el sistema valida conectividad con Ollama y disponibilidad del modelo configurado antes de levantar el bot.
+* Si la validación falla, el bot no inicia polling para evitar clasificaciones inconsistentes.
 
 Documentación detallada de modelos y enfoque runtime:
 

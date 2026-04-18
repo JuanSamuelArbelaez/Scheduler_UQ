@@ -4,6 +4,7 @@ from dataclasses import replace
 from datetime import datetime
 import json
 import sqlite3
+from typing import Any
 
 from models.entities import Event, HistoryEntry, Reminder, User
 
@@ -43,6 +44,25 @@ class UserRepository:
             email=row["email"],
             preferences=json.loads(row["preferences"] or "{}"),
         )
+
+    def get_by_id(self, user_id: int) -> User:
+        row = self.connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            raise LookupError("User not found")
+        return User(
+            id=row["id"],
+            telegram_chat_id=row["telegram_chat_id"],
+            email=row["email"],
+            preferences=json.loads(row["preferences"] or "{}"),
+        )
+
+    def update_email_and_preferences(self, user_id: int, email: str | None, preferences: dict[str, Any]) -> User:
+        self.connection.execute(
+            "UPDATE users SET email = ?, preferences = ? WHERE id = ?",
+            (email, json.dumps(preferences), user_id),
+        )
+        self.connection.commit()
+        return self.get_by_id(user_id)
 
 
 class EventRepository:
@@ -145,11 +165,57 @@ class ReminderRepository:
 
     def create(self, reminder: Reminder) -> Reminder:
         cursor = self.connection.execute(
-            "INSERT INTO reminders (event_id, remind_at, channel) VALUES (?, ?, ?)",
+            "INSERT INTO reminders (event_id, remind_at, channel, sent_at, delivery_status) VALUES (?, ?, ?, NULL, NULL)",
             (reminder.event_id, reminder.remind_at.isoformat(), reminder.channel),
         )
         self.connection.commit()
         return replace(reminder, id=cursor.lastrowid)
+
+    def list_due_unsent(self, now_at: datetime) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            """
+            SELECT
+                reminders.id AS reminder_id,
+                reminders.event_id AS event_id,
+                reminders.remind_at AS remind_at,
+                events.user_id AS user_id,
+                events.title AS event_title,
+                events.start_time AS event_start_time,
+                users.email AS user_email,
+                users.preferences AS user_preferences
+            FROM reminders
+            JOIN events ON events.id = reminders.event_id
+            JOIN users ON users.id = events.user_id
+            WHERE reminders.sent_at IS NULL
+              AND reminders.remind_at <= ?
+              AND events.status != 'cancelled'
+            ORDER BY reminders.remind_at ASC
+            """,
+            (now_at.isoformat(),),
+        ).fetchall()
+
+        payload: list[dict[str, Any]] = []
+        for row in rows:
+            payload.append(
+                {
+                    "reminder_id": row["reminder_id"],
+                    "event_id": row["event_id"],
+                    "remind_at": _parse_datetime(row["remind_at"]),
+                    "user_id": row["user_id"],
+                    "event_title": row["event_title"],
+                    "event_start_time": _parse_datetime(row["event_start_time"]),
+                    "user_email": row["user_email"],
+                    "user_preferences": json.loads(row["user_preferences"] or "{}"),
+                }
+            )
+        return payload
+
+    def mark_delivery(self, reminder_id: int, delivery_status: str) -> None:
+        self.connection.execute(
+            "UPDATE reminders SET sent_at = ?, delivery_status = ? WHERE id = ?",
+            (datetime.utcnow().isoformat(), delivery_status, reminder_id),
+        )
+        self.connection.commit()
 
 
 class HistoryRepository:
