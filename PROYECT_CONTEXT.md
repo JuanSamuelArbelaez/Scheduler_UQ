@@ -190,3 +190,21 @@ Comandos soportados en la base actual:
 * `/cancel id`
 
 El arranque del polling se controla con `RUN_TELEGRAM_BOT=true`.
+
+## 14. Estado de Pruebas
+
+El proyecto está listo para una prueba funcional inicial en Telegram con comandos estructurados.
+
+### Checklist mínimo
+
+* Configurar `.env` con token y `RUN_TELEGRAM_BOT=true`
+* Instalar dependencias con `pip install -r requirements.txt`
+* Ejecutar `python main.py`
+
+### Qué validar
+
+* Crear cita con `/create`
+* Consultar agenda con `/agenda`
+* Actualizar cita con `/update`
+* Cancelar cita con `/cancel`
+* Ver mensajes naturales luego de cada acción

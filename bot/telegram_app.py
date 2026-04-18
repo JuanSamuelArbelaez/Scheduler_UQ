@@ -31,7 +31,7 @@ class TelegramDependencies:
 
 
 def build_application(token: str, dependencies: TelegramDependencies) -> Application:
-    application = ApplicationBuilder().token(token).build()
+    application = ApplicationBuilder().token(token).concurrent_updates(False).build()
     application.bot_data["dependencies"] = dependencies
 
     application.add_handler(CommandHandler("start", start_command))
@@ -41,6 +41,7 @@ def build_application(token: str, dependencies: TelegramDependencies) -> Applica
     application.add_handler(CommandHandler("update", update_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
+    application.add_error_handler(error_handler)
     return application
 
 
@@ -78,20 +79,23 @@ async def create_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.effective_message.reply_text(USAGE_CREATE)
         return
 
-    title, start_raw, end_raw, description = parts
-    event = Event(
-        id=None,
-        user_id=user.id or 0,
-        title=title,
-        description=description,
-        location=None,
-        start_time=_parse_datetime(start_raw),
-        end_time=_parse_datetime(end_raw),
-        priority=3,
-    )
-    result = dependencies.scheduling.create_event(event)
-    dependencies.history.record(user.id or 0, "create", result.event.id if result.event else None, result.message)
-    await update.effective_message.reply_text(result.message)
+    try:
+        title, start_raw, end_raw, description = parts
+        event = Event(
+            id=None,
+            user_id=user.id or 0,
+            title=title,
+            description=description,
+            location=None,
+            start_time=_parse_datetime(start_raw),
+            end_time=_parse_datetime(end_raw),
+            priority=3,
+        )
+        result = dependencies.scheduling.create_event(event)
+        dependencies.history.record(user.id or 0, "create", result.event.id if result.event else None, result.message)
+        await update.effective_message.reply_text(result.message)
+    except ValueError as error:
+        await update.effective_message.reply_text(f"No pude crear la cita: {error}")
 
 
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -103,20 +107,25 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.effective_message.reply_text(USAGE_UPDATE)
         return
 
-    event_id_raw, title, start_raw, end_raw, description = parts
-    event = Event(
-        id=int(event_id_raw),
-        user_id=user.id or 0,
-        title=title,
-        description=description,
-        location=None,
-        start_time=_parse_datetime(start_raw),
-        end_time=_parse_datetime(end_raw),
-        priority=3,
-    )
-    result = dependencies.scheduling.update_event(event)
-    dependencies.history.record(user.id or 0, "update", result.event.id if result.event else None, result.message)
-    await update.effective_message.reply_text(result.message)
+    try:
+        event_id_raw, title, start_raw, end_raw, description = parts
+        event = Event(
+            id=int(event_id_raw),
+            user_id=user.id or 0,
+            title=title,
+            description=description,
+            location=None,
+            start_time=_parse_datetime(start_raw),
+            end_time=_parse_datetime(end_raw),
+            priority=3,
+        )
+        result = dependencies.scheduling.update_event(event)
+        dependencies.history.record(user.id or 0, "update", result.event.id if result.event else None, result.message)
+        await update.effective_message.reply_text(result.message)
+    except ValueError as error:
+        await update.effective_message.reply_text(f"No pude actualizar la cita: {error}")
+    except LookupError as error:
+        await update.effective_message.reply_text(f"No pude actualizar la cita: {error}")
 
 
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -127,9 +136,14 @@ async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await update.effective_message.reply_text(USAGE_CANCEL)
         return
 
-    result = dependencies.scheduling.cancel_event(int(payload))
-    dependencies.history.record(user.id or 0, "cancel", result.event.id if result.event else None, result.message)
-    await update.effective_message.reply_text(result.message)
+    try:
+        result = dependencies.scheduling.cancel_event(int(payload))
+        dependencies.history.record(user.id or 0, "cancel", result.event.id if result.event else None, result.message)
+        await update.effective_message.reply_text(result.message)
+    except ValueError as error:
+        await update.effective_message.reply_text(f"No pude cancelar la cita: {error}")
+    except LookupError as error:
+        await update.effective_message.reply_text(f"No pude cancelar la cita: {error}")
 
 
 async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -183,3 +197,9 @@ def _split_payload(payload: str, expected_parts: int) -> list[str] | None:
 
 def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    message = "Ocurrió un error inesperado procesando tu solicitud. Inténtalo de nuevo."
+    if isinstance(update, Update) and update.effective_message is not None:
+        await update.effective_message.reply_text(message)

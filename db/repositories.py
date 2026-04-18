@@ -27,6 +27,7 @@ class UserRepository:
             """,
             (user.telegram_chat_id, user.email, json.dumps(user.preferences)),
         )
+        self.connection.commit()
         return self.get_by_chat_id(user.telegram_chat_id)
 
     def get_by_chat_id(self, telegram_chat_id: str) -> User:
@@ -65,6 +66,7 @@ class EventRepository:
                 event.status,
             ),
         )
+        self.connection.commit()
         return replace(event, id=cursor.lastrowid)
 
     def get_by_id(self, event_id: int) -> Event:
@@ -100,10 +102,12 @@ class EventRepository:
                 event.id,
             ),
         )
+        self.connection.commit()
         return event
 
     def cancel(self, event_id: int) -> None:
         self.connection.execute("UPDATE events SET status = 'cancelled' WHERE id = ?", (event_id,))
+        self.connection.commit()
 
     def has_overlap(self, user_id: int, start_time: datetime, end_time: datetime, exclude_event_id: int | None = None) -> bool:
         query = """
@@ -144,6 +148,7 @@ class ReminderRepository:
             "INSERT INTO reminders (event_id, remind_at, channel) VALUES (?, ?, ?)",
             (reminder.event_id, reminder.remind_at.isoformat(), reminder.channel),
         )
+        self.connection.commit()
         return replace(reminder, id=cursor.lastrowid)
 
 
@@ -165,4 +170,5 @@ class HistoryRepository:
                 entry.details,
             ),
         )
+        self.connection.commit()
         return replace(entry, id=cursor.lastrowid)
