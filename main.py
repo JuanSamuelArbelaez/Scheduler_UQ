@@ -9,6 +9,7 @@ from agents.orchestrator import OrchestratorAgent
 from agents.preferences import UserPreferencesAgent
 from agents.priority import PriorityAgent
 from agents.scheduling import SchedulingAgent
+from bot.telegram_app import TelegramDependencies, build_application as build_telegram_application
 from config.settings import load_settings
 from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
@@ -68,9 +69,23 @@ def main() -> None:
 	settings = application["settings"]
 	if settings.telegram_bot_token is None:
 		print("TELEGRAM_BOT_TOKEN no esta configurado. Solo se inicializo la base local.")
-	else:
-		print("Configuracion cargada correctamente. El siguiente paso es conectar el bot de Telegram.")
+		print("El sistema ya esta preparado para devolver mensajes naturales tras agendar, modificar o cancelar citas.")
+		return
 
+	if settings.run_telegram_bot:
+		dependencies = TelegramDependencies(
+			orchestrator=application["agents"]["orchestrator"],
+			scheduling=application["agents"]["scheduling"],
+			preferences=application["agents"]["preferences"],
+			notification=application["agents"]["notification"],
+			history=application["agents"]["history"],
+		)
+		telegram_application = build_telegram_application(settings.telegram_bot_token, dependencies)
+		print("Iniciando bot de Telegram con mensajes naturales y handlers de agenda.")
+		telegram_application.run_polling()
+		return
+
+	print("Configuracion cargada correctamente. El siguiente paso es conectar el bot de Telegram.")
 	print("El sistema ya esta preparado para devolver mensajes naturales tras agendar, modificar o cancelar citas.")
 
 

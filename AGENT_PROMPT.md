@@ -71,6 +71,7 @@ Cada agente debe ser independiente:
   * `TELEGRAM_BOT_URL`
 
 * Cargar `.env` en desarrollo si existe, pero no versionarlo.
+* Usar `RUN_TELEGRAM_BOT` para controlar si el bot entra en polling.
 
 ---
 
@@ -162,6 +163,7 @@ project/
 ├── db/
 ├── services/
 ├── config/
+├── bot/
 ├── .env.example
 ├── .gitignore
 └── main.py

@@ -11,6 +11,7 @@ class AppSettings:
     telegram_bot_url: str | None
     sqlite_path: Path
     default_reminder_minutes: int = 15
+    run_telegram_bot: bool = False
 
 
 def load_settings() -> AppSettings:
@@ -18,12 +19,14 @@ def load_settings() -> AppSettings:
 
     sqlite_path = Path(os.getenv("SQLITE_PATH", "scheduler.db"))
     default_reminder_minutes = int(os.getenv("DEFAULT_REMINDER_MINUTES", "15"))
+    run_telegram_bot = _parse_bool(os.getenv("RUN_TELEGRAM_BOT", "false"))
 
     return AppSettings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
         telegram_bot_url=os.getenv("TELEGRAM_BOT_URL"),
         sqlite_path=sqlite_path,
         default_reminder_minutes=default_reminder_minutes,
+        run_telegram_bot=run_telegram_bot,
     )
 
 
@@ -40,3 +43,7 @@ def _load_dotenv(path: Path) -> None:
         key = key.strip()
         value = value.strip().strip('"').strip("'")
         os.environ.setdefault(key, value)
+
+
+def _parse_bool(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}

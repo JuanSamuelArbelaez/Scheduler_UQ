@@ -129,6 +129,7 @@ Variables usadas actualmente:
 * `DEFAULT_REMINDER_MINUTES` → minutos por defecto para recordatorio
 * `TELEGRAM_BOT_TOKEN` → token del bot
 * `TELEGRAM_BOT_URL` → URL pública del bot
+* `RUN_TELEGRAM_BOT` → habilita el polling del bot en desarrollo
 
 Se recomienda mantener un archivo `.env.example` para valores de referencia y no versionar `.env`.
 
@@ -174,3 +175,18 @@ Ejemplos:
 * Google Calendar
 * Multi-idioma
 * Optimización de agenda
+
+## 13. Telegram
+
+El proyecto ya incluye una capa inicial de integración con `python-telegram-bot`.
+
+Comandos soportados en la base actual:
+
+* `/start`
+* `/help`
+* `/agenda`
+* `/create titulo | inicio_iso | fin_iso | descripcion`
+* `/update id | titulo | inicio_iso | fin_iso | descripcion`
+* `/cancel id`
+
+El arranque del polling se controla con `RUN_TELEGRAM_BOT=true`.
