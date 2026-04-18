@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from pathlib import Path
+from types import SimpleNamespace
+import sqlite3
 import unittest
 
 from agents.confirmation import ConfirmationAgent
@@ -22,17 +23,15 @@ from bot.telegram_app import (
     _parse_natural_update,
     _split_payload,
     build_application,
+    text_router,
 )
-from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
-from models.entities import Event
+from models.entities import Event, User
 
 
 class TelegramBotTests(unittest.TestCase):
     def setUp(self) -> None:
-        database = Database(Path(":memory:"))
-        database.initialize()
-        self.connection = database.connect()
+        self.connection = _create_in_memory_connection()
 
         users = UserRepository(self.connection)
         events = EventRepository(self.connection)
@@ -111,3 +110,141 @@ class TelegramBotTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class _FakeMessage:
+    def __init__(self, text: str) -> None:
+        self.text = text
+        self.replies: list[str] = []
+
+    async def reply_text(self, text: str) -> None:
+        self.replies.append(text)
+
+
+class _FakeUpdate:
+    def __init__(self, text: str, chat_id: int = 12345) -> None:
+        self.effective_message = _FakeMessage(text)
+        self.effective_chat = SimpleNamespace(id=chat_id)
+
+
+class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self) -> None:
+        self.connection = _create_in_memory_connection()
+
+        users = UserRepository(self.connection)
+        events = EventRepository(self.connection)
+        reminders = ReminderRepository(self.connection)
+        history = HistoryRepository(self.connection)
+
+        self.dependencies = TelegramDependencies(
+            orchestrator=OrchestratorAgent(NLPAgent(), IntentAgent(), PriorityAgent(), ConfirmationAgent()),
+            scheduling=SchedulingAgent(events, reminders, default_reminder_minutes=15),
+            preferences=UserPreferencesAgent(users),
+            notification=NotificationAgent(),
+            history=HistoryAgent(history),
+        )
+        self.context = SimpleNamespace(
+            application=SimpleNamespace(bot_data={"dependencies": self.dependencies}),
+            user_data={},
+        )
+
+    def tearDown(self) -> None:
+        self.connection.close()
+
+    async def test_natural_create_requires_confirmation_then_persists_event(self) -> None:
+        first_update = _FakeUpdate("programa demo de producto manana a las 15:30")
+        await text_router(first_update, self.context)
+
+        self.assertIn("Confirmas crear la cita", first_update.effective_message.replies[0])
+        self.assertIn("pending_action", self.context.user_data)
+
+        confirm_update = _FakeUpdate("si")
+        await text_router(confirm_update, self.context)
+
+        self.assertTrue(any("Listo, agend" in reply for reply in confirm_update.effective_message.replies))
+        events = self.dependencies.scheduling.list_agenda(1)
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0].title, "demo de producto")
+
+    async def test_natural_cancel_requires_confirmation_then_cancels_event(self) -> None:
+        user = self.dependencies.preferences.upsert_user(User(id=None, telegram_chat_id="12345"))
+        start_time = datetime.now() + timedelta(days=2)
+        created = self.dependencies.scheduling.create_event(
+            Event(
+                id=None,
+                user_id=user.id or 0,
+                title="Reunion de estado",
+                description=None,
+                location=None,
+                start_time=start_time,
+                end_time=start_time + timedelta(hours=1),
+                priority=3,
+            )
+        )
+        self.assertIsNotNone(created.event)
+
+        first_update = _FakeUpdate("cancela reunion de estado")
+        await text_router(first_update, self.context)
+        self.assertIn("Confirmas cancelar la cita", first_update.effective_message.replies[0])
+
+        reject_update = _FakeUpdate("no")
+        await text_router(reject_update, self.context)
+        self.assertIn("Acción cancelada", reject_update.effective_message.replies[0])
+
+        second_update = _FakeUpdate("cancela reunion de estado")
+        await text_router(second_update, self.context)
+        confirm_update = _FakeUpdate("si")
+        await text_router(confirm_update, self.context)
+
+        self.assertTrue(any("Cancelé la cita" in reply for reply in confirm_update.effective_message.replies))
+        event_after = self.dependencies.scheduling.service.events.get_by_id(created.event.id or 0)
+        self.assertEqual(event_after.status, "cancelled")
+
+
+def _create_in_memory_connection() -> sqlite3.Connection:
+    connection = sqlite3.connect(":memory:")
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA foreign_keys = ON")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            telegram_chat_id TEXT NOT NULL UNIQUE,
+            email TEXT,
+            preferences TEXT NOT NULL DEFAULT '{}'
+        );
+
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            description TEXT,
+            location TEXT,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            priority INTEGER NOT NULL DEFAULT 3,
+            status TEXT NOT NULL DEFAULT 'scheduled',
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER NOT NULL,
+            remind_at TEXT NOT NULL,
+            channel TEXT NOT NULL DEFAULT 'telegram',
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            event_id INTEGER,
+            action TEXT NOT NULL,
+            timestamp TEXT NOT NULL,
+            details TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL
+        );
+        """
+    )
+    return connection

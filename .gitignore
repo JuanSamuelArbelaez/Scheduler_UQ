@@ -1,5 +1,6 @@
 .env
 scheduler.db
+test_*.db
 __pycache__/
 *.pyc
 .venv/

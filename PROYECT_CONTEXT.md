@@ -195,6 +195,8 @@ El arranque del polling se controla con `RUN_TELEGRAM_BOT=true`.
 
 El proyecto está listo para una prueba funcional inicial en Telegram con comandos estructurados.
 
+También incluye flujo conversacional por lenguaje natural con confirmación explícita.
+
 ### Checklist mínimo
 
 * Configurar `.env` con token y `RUN_TELEGRAM_BOT=true`
@@ -208,6 +210,7 @@ El proyecto está listo para una prueba funcional inicial en Telegram con comand
 * Actualizar cita con `/update`
 * Cancelar cita con `/cancel`
 * Ver mensajes naturales luego de cada acción
+* Crear/modificar/cancelar por texto libre con confirmación "si/no"
 
 ### Módulo de pruebas
 
@@ -216,6 +219,13 @@ Se añadió un módulo de pruebas automáticas para agentes y bot de Telegram:
 * `tests/test_agents.py`
 * `tests/test_telegram_bot.py`
 * `run_tests.py`
+
+Cobertura actual del módulo de pruebas:
+
+* Clasificación de intención y orquestación
+* Formato de notificaciones
+* Parsing de lenguaje natural (create/update/cancel)
+* Flujo conversacional end-to-end (texto libre -> confirmación -> ejecución)
 
 Ejecución:
 
