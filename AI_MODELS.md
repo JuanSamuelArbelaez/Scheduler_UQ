@@ -13,10 +13,22 @@ Esto significa que:
 * Priority Agent usa reglas por palabras de urgencia
 * Confirmation Agent usa reglas de negocio para confirmar acciones críticas
 
+### Proveedores y versiones en runtime
+
+* Proveedor LLM remoto: ninguno
+* Proveedor LLM local: ninguno por ahora
+* Versión de modelo en runtime: no aplica, porque el flujo operativo actual no depende de un LLM
+
+Todo el comportamiento productivo actual es local y determinístico.
+
 ## 2. Modelo usado para desarrollo asistido
 
 Durante el desarrollo del código se usa un asistente de programación (GPT-5.3-Codex),
 pero ese modelo **no forma parte del runtime de producción** del bot.
+
+* Proveedor de desarrollo: OpenAI
+* Modelo de desarrollo asistido: GPT-5.3-Codex
+* Uso: generación y refactorización de código durante el desarrollo, no inferencia del bot en producción
 
 ## 3. Mapeo actual por agente
 
@@ -35,6 +47,7 @@ pero ese modelo **no forma parte del runtime de producción** del bot.
 Si se integra un LLM en runtime, se recomienda:
 
 * agregar proveedor y versión en este archivo
+* preferir un proveedor local cuando el caso de uso permita privacidad/offline
 * separar prompts por agente
 * agregar fallback determinístico ante timeout/errores
 * versionar métricas de precisión del parser natural
