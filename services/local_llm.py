@@ -106,11 +106,14 @@ class LocalOllamaClient:
 
     def list_models(self) -> list[str] | None:
         try:
-            response = self._post_json("/api/tags", {})
+            # Use GET request for /api/tags endpoint
+            with urlopen(f"{self.base_url}/api/tags", timeout=20) as response:
+                raw_body = response.read().decode("utf-8")
+            response_data = json.loads(raw_body)
         except (URLError, TimeoutError, ValueError):
             return None
 
-        models_raw = response.get("models") if isinstance(response, dict) else None
+        models_raw = response_data.get("models") if isinstance(response_data, dict) else None
         if not isinstance(models_raw, list):
             return []
 
