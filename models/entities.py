@@ -24,6 +24,13 @@ class Event:
     end_time: datetime
     priority: int = 3
     status: str = "scheduled"
+    source: str = "telegram"  # telegram, web, api
+    timezone: str = "America/Bogota"
+    created_at: datetime = field(default_factory=lambda: datetime.now())
+    updated_at: datetime = field(default_factory=lambda: datetime.now())
+    confirmed: bool = False
+    metadata: dict[str, Any] = field(default_factory=dict)
+    recurrence_rule: str | None = None  # Para futuras expansiones
 
 
 @dataclass(slots=True)
@@ -31,7 +38,7 @@ class Reminder:
     id: int | None
     event_id: int
     remind_at: datetime
-    channel: str = "telegram"
+    channel: str = "both"  # telegram, email, both
 
 
 @dataclass(slots=True)

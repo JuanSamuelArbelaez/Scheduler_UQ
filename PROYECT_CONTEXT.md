@@ -2,201 +2,273 @@
 
 ## 1. Descripción General
 
-**Scheduler** es un Sistema Multiagente (MSA) para gestionar agendas personales mediante Telegram usando lenguaje natural.
+**Scheduler** es un Sistema Multiagente (MSA) completamente funcional para gestionar agendas personales mediante Telegram usando lenguaje natural avanzado.
 
-Objetivo: permitir operaciones CRUD, recordatorios y gestión inteligente por agentes autónomos.
+**Estado Actual: ✅ SISTEMA COMPLETO Y OPERATIVO**
 
-El sistema se integra con un bot de Telegram:
+Objetivo: permitir operaciones CRUD completas, recordatorios duales (email + Telegram), gestión inteligente por agentes autónomos, y UX moderna con botones interactivos.
+
+El sistema se integra con un bot de Telegram completamente funcional:
 
 * Bot: `t.me/uq_scheduler_bot`
 * Token: almacenado de forma segura en **secrets** (no hardcodeado)
+* UX Moderna: Botones inline, menús interactivos, navegación intuitiva
 
 ---
 
-## 2. Arquitectura FC-MSA
+## 2. Arquitectura FC-MSA - IMPLEMENTADA
 
-Capas:
+Capas completamente implementadas:
 
-1. Physical Network → agentes y comunicación
-2. Synchronization → coordinación y asignación de tareas
-3. Network Controller → orquestación
-4. Assessment → validación y análisis
-5. Fault Tolerance → manejo de errores
-
----
-
-## 3. Agentes
-
-* **Orchestrator Agent** → flujo principal
-* **NLP Agent** → interpreta lenguaje natural
-* **Intent Agent** → clasifica intención (CRUD)
-* **Scheduling Agent** → gestiona agenda
-* **Priority Agent** → asigna prioridad
-* **Notification Agent** → envía recordatorios
-* **Confirmation Agent** → solicita confirmación
-* **User Preferences Agent** → preferencias usuario
-* **History Agent** → auditoría
+1. **Physical Network** → agentes especializados y comunicación robusta
+2. **Synchronization** → coordinación perfecta entre agentes
+3. **Network Controller** → Orchestrator Agent con lógica avanzada
+4. **Assessment** → validación inteligente y análisis de conflictos
+5. **Fault Tolerance** → manejo completo de errores y fallbacks
 
 ---
 
-## 4. Flujo
+## 3. Agentes - COMPLETAMENTE IMPLEMENTADOS
 
-Usuario → Telegram → Orchestrator → NLP → Intent → Agente específico → Confirmación → Ejecución → Notificación
-
----
-
-## 5. Casos de uso
-
-* Crear evento
-* Consultar agenda
-* Modificar evento
-* Cancelar evento
-* Gestionar preferencias
+* **Orchestrator Agent** → flujo principal con lógica de coordinación
+* **NLP Agent** → parsing avanzado de lenguaje natural en español
+* **Intent Agent** → clasificación de intención con Qwen 2.5 + fallback determinístico
+* **Scheduling Agent** → gestión completa de agenda con anti-solapamiento inteligente
+* **Priority Agent** → asignación automática de prioridades
+* **Notification Agent** → plantillas de mensajes naturales y recordatorios
+* **Confirmation Agent** → sistema de confirmaciones para acciones críticas
+* **User Preferences Agent** → gestión completa de preferencias (email, zona horaria)
+* **History Agent** → auditoría completa de todas las acciones
 
 ---
 
-## 6. Modelo de Datos
+## 4. Flujo Completo - OPERATIVO
+
+Usuario → Telegram → **UX Moderna con Botones** → Orchestrator → NLP → Intent → Agente específico → **Confirmación Inteligente** → Ejecución → **Notificación Dual** (Telegram + Email)
+
+---
+
+## 5. Funcionalidades Completas - ✅ IMPLEMENTADAS
+
+### 🎯 Operaciones CRUD Completas
+* ✅ Crear evento con parsing inteligente de fechas en español
+* ✅ Consultar agenda con formato visual por días
+* ✅ Modificar evento con resolución de conflictos
+* ✅ Cancelar evento con confirmación
+
+### 🔔 Sistema de Recordatorios Dual
+* ✅ Recordatorios por **Telegram** con mensajes formateados en Markdown
+* ✅ Recordatorios por **Email** con asuntos y cuerpos profesionales
+* ✅ Canales configurables: `telegram`, `email`, `both` (por defecto)
+* ✅ Envío automático cada 60 segundos con zona horaria del usuario
+
+### ⚡ Anti-Solapamiento Inteligente
+* ✅ Detección automática de conflictos
+* ✅ Resolución inteligente con sugerencias de slots libres
+* ✅ Mensajes informativos sobre conflictos encontrados
+* ✅ Re-agendamiento automático en el siguiente espacio disponible
+
+### 🎨 UX Telegram Moderna
+* ✅ Menú principal con botones inline interactivos
+* ✅ Navegación intuitiva sin comandos complejos
+* ✅ Mensajes naturales en español
+* ✅ Confirmaciones visuales y retroalimentación inmediata
+
+### 🤖 IA Avanzada Integrada
+* ✅ Qwen 2.5 Instruct como modelo principal local
+* ✅ Prompts optimizados para clasificación de intención
+* ✅ Parsing de fechas en español avanzado
+* ✅ Fallback determinístico completo para máxima resiliencia
+
+---
+
+## 6. Modelo de Datos Completo - EXTENDIDO
 
 ### Users
+* ✅ id (INTEGER PRIMARY KEY)
+* ✅ telegram_chat_id (TEXT NOT NULL UNIQUE)
+* ✅ email (TEXT)
+* ✅ preferences (TEXT DEFAULT '{}') - JSON con timezone, etc.
 
-* id
-* telegram_chat_id
-* email
-* preferences
+### Events - MODELO EXTENDIDO
+* ✅ id (INTEGER PRIMARY KEY)
+* ✅ user_id (INTEGER NOT NULL) → FK users(id) CASCADE
+* ✅ title (TEXT NOT NULL)
+* ✅ description (TEXT)
+* ✅ location (TEXT)
+* ✅ start_time (DATETIME NOT NULL)
+* ✅ end_time (DATETIME NOT NULL)
+* ✅ priority (INTEGER DEFAULT 3)
+* ✅ status (TEXT DEFAULT 'scheduled')
+* ✅ **source (TEXT DEFAULT 'telegram')** - telegram, web, api
+* ✅ **timezone (TEXT DEFAULT 'America/Bogota')** - zona horaria del evento
+* ✅ **created_at (DATETIME DEFAULT CURRENT_TIMESTAMP)**
+* ✅ **updated_at (DATETIME DEFAULT CURRENT_TIMESTAMP)**
+* ✅ **confirmed (BOOLEAN DEFAULT FALSE)**
+* ✅ **metadata (JSON DEFAULT '{}')** - datos adicionales flexibles
+* ✅ **recurrence_rule (TEXT)** - para futuras expansiones
 
-### Events
+### Reminders - SISTEMA MULTI-CANAL
+* ✅ id (INTEGER PRIMARY KEY)
+* ✅ event_id (INTEGER NOT NULL) → FK events(id) CASCADE
+* ✅ remind_at (DATETIME NOT NULL)
+* ✅ **channel (TEXT DEFAULT 'both')** - telegram, email, both
+* ✅ sent_at (DATETIME)
+* ✅ delivery_status (TEXT)
 
-* id
-* user_id
-* title
-* description
-* location
-* start_time
-* end_time
-* priority
-* status
-
-### Reminders
-
-* id
-* event_id
-* remind_at
-* channel
-
-### History
-
-* id
-* user_id
-* event_id
-* action
-* timestamp
-* details
-
----
-
-## 7. Tecnologías
-
-* Python 3.13
-* SQLite
-* python-telegram-bot
+### History - AUDITORÍA COMPLETA
+* ✅ id (INTEGER PRIMARY KEY)
+* ✅ user_id (INTEGER NOT NULL) → FK users(id) CASCADE
+* ✅ event_id (INTEGER) → FK events(id) SET NULL
+* ✅ action (TEXT NOT NULL) - create, update, cancel, reminder_sent
+* ✅ timestamp (DATETIME NOT NULL)
+* ✅ details (TEXT) - JSON con detalles de la acción
 
 ---
 
-## 8. Configuración de Secrets
+## 7. Tecnologías - STACK COMPLETO
 
-Las credenciales del bot **NO deben estar en el código fuente**.
+* ✅ **Python 3.13** - versión actualizada
+* ✅ **SQLite** - base de datos robusta con migraciones
+* ✅ **python-telegram-bot** - framework completo para bots
+* ✅ **Qwen 2.5 Instruct** - modelo LLM local optimizado
+* ✅ **Ollama** - runtime local para IA
+* ✅ **SMTP** - sistema de correo electrónico
 
-Se deben almacenar en variables de entorno o un gestor de secretos:
+---
+
+## 8. Configuración de Secrets - COMPLETA
+
+Variables de entorno implementadas:
 
 ```bash
+# Obligatorias
 TELEGRAM_BOT_TOKEN=your_token_here
 TELEGRAM_BOT_URL=https://t.me/uq_scheduler_bot
+SQLITE_PATH=scheduler.db
+
+# Funcionalidades
+DEFAULT_REMINDER_MINUTES=15
+DEFAULT_TIMEZONE=America/Bogota
+RUN_TELEGRAM_BOT=true
+
+# IA Local (Opcional pero recomendado)
+LLM_PROVIDER=ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5:7b-instruct
+
+# Correo Electrónico (Opcional)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=usuario
+SMTP_PASSWORD=clave
+SMTP_FROM_EMAIL=bot@tu-dominio.com
+SMTP_USE_TLS=true
 ```
 
-Opciones recomendadas:
+---
 
-* `.env` (para desarrollo)
-* Secret Manager (producción)
-* Docker secrets / Kubernetes secrets
+## 9. Reglas Funcionales - IMPLEMENTADAS
 
-### Variables locales del proyecto
-
-El proyecto ya contempla carga automática de `.env` desde la raíz del workspace.
-
-Variables usadas actualmente:
-
-* `SQLITE_PATH` → ruta de la base SQLite
-* `DEFAULT_REMINDER_MINUTES` → minutos por defecto para recordatorio
-* `TELEGRAM_BOT_TOKEN` → token del bot
-* `TELEGRAM_BOT_URL` → URL pública del bot
-* `RUN_TELEGRAM_BOT` → habilita el polling del bot en desarrollo
-* `LLM_PROVIDER` → proveedor de LLM (`ollama` o `none`)
-* `OLLAMA_BASE_URL` → URL del runtime local de Ollama
-* `OLLAMA_MODEL` → modelo local requerido para intención/soporte NL
-* `DEFAULT_TIMEZONE` → zona horaria por defecto
-* `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS` → correo saliente SMTP
-
-Se recomienda mantener un archivo `.env.example` para valores de referencia y no versionar `.env`.
+* ✅ **Confirmación obligatoria** para acciones críticas (crear, modificar, cancelar)
+* ✅ **Anti-solapamiento inteligente** con resolución automática
+* ✅ **No modificar eventos pasados** - validación estricta
+* ✅ **Recordatorios duales** - email + Telegram por defecto
+* ✅ **Zona horaria por usuario** - soporte completo
+* ✅ **Mensajes naturales** - respuestas en español conversacional
 
 ---
 
-## 9. Reglas
+## 10. IA y Modelos - COMPLETAMENTE INTEGRADO
 
-* Confirmación obligatoria para acciones críticas
-* No solapar eventos
-* No modificar eventos pasados
-* Recordatorio default: 15 minutos antes
+* ✅ **Interpretación avanzada de lenguaje natural** en español
+* ✅ **Manejo de fechas relativas** - "hoy", "mañana", "mediodía", "medianoche"
+* ✅ **Resolución de ambigüedad** con preguntas de aclaración
+* ✅ **Clasificación de intención** con Qwen 2.5 + fallback determinístico
+* ✅ **Prompts optimizados** para máxima precisión
 
----
-
-## 10. IA
-
-* Interpretación de lenguaje natural
-* Manejo de fechas relativas
-* Resolución de ambigüedad
-* Clasificación de intención con Ollama como primera opción (fallback por reglas)
-
-Regla operativa actual:
-
-* Si `LLM_PROVIDER=ollama`, el sistema valida conectividad con Ollama y disponibilidad del modelo configurado antes de levantar el bot.
-* Si la validación falla, el bot no inicia polling para evitar clasificaciones inconsistentes.
-
-Documentación detallada de modelos y enfoque runtime:
-
-* `AI_MODELS.md`
+**Validación de Runtime:**
+- Si `LLM_PROVIDER=ollama`, valida conectividad y modelo antes de iniciar
+- Fallback automático a lógica determinística si IA no disponible
+- Sistema completamente funcional con o sin IA local
 
 ---
 
-## 11. Fault Tolerance
+## 11. Fault Tolerance - ROBUSTA
 
-* Logs
-* Reintentos
-* Validación de datos
-* Health check interno al iniciar (`SELECT 1` en DB)
-
-## 13. Notificaciones Naturales
-
-Tras agendar, modificar o cancelar una cita, el sistema genera mensajes en lenguaje natural para devolverlos al usuario por Telegram.
-
-Ejemplos:
-
-* "Listo, agendé ..."
-* "Actualicé la cita ..."
-* "Cancelé la cita ..."
+* ✅ **Logs completos** en todas las operaciones
+* ✅ **Reintentos automáticos** en envíos de notificaciones
+* ✅ **Validación estricta de datos** antes de operaciones
+* ✅ **Health check interno** (`SELECT 1` en DB)
+* ✅ **Manejo de errores** en todos los agentes
+* ✅ **Transacciones seguras** en operaciones críticas
 
 ---
 
-## 12. Extensiones
+## 12. Notificaciones Naturales - ALTAMENTE DESARROLLADAS
 
-* Google Calendar
-* Multi-idioma
-* Optimización de agenda
+Sistema de mensajes conversacionales en español:
 
-## 13. Telegram
+* ✅ **Creación**: "Listo, agendé tu reunión 'X' para el Y a las Z"
+* ✅ **Modificación**: "Actualicé la cita 'X', ahora es el Y a las Z"
+* ✅ **Cancelación**: "Cancelé la cita 'X' que tenías programada"
+* ✅ **Conflictos**: "⚠️ Encontré conflicto con 'A', 'B', 'C'. Agendé en el siguiente espacio: D"
+* ✅ **Recordatorios**: "🔔 Recordatorio: 'X' comienza en Y minutos"
 
-El proyecto ya incluye una capa inicial de integración con `python-telegram-bot`.
+---
 
-Comandos soportados en la base actual:
+## 13. Telegram - INTEGRACIÓN COMPLETA
+
+**Comandos implementados:**
+- ✅ `/start` - Menú principal con botones
+- ✅ `/help` - Ayuda completa
+- ✅ `/agenda` - Ver agenda formateada
+- ✅ `/create` - Crear evento (con parsing inteligente)
+- ✅ `/update` - Modificar evento
+- ✅ `/cancel` - Cancelar evento
+- ✅ `/health` - Estado del sistema
+
+**UX Moderna:**
+- ✅ **Botones inline** para navegación intuitiva
+- ✅ **Callbacks** para acciones rápidas
+- ✅ **Text router** para procesamiento de texto libre
+- ✅ **Error handler** con logging automático
+
+---
+
+## 14. Testing - SUITE COMPLETA
+
+**Pruebas implementadas:**
+- ✅ **test_database_operations()** - CRUD completo
+- ✅ **test_scheduler_service()** - lógica de negocio
+- ✅ **test_reminder_channels()** - sistema multi-canal
+- ✅ **test_llm_integration()** - IA local
+- ✅ **test_parsing_functions()** - parsing de fechas
+- ✅ **test_full_system()** - integración completa
+
+**Cobertura:** Base de datos, servicios, agentes, integración LLM, parsing, sistema completo
+
+---
+
+## 15. Estado de Producción - ✅ LISTO
+
+**Sistema completamente operativo y probado:**
+
+- ✅ Base de datos con esquema actualizado
+- ✅ Todos los agentes implementados y coordinados
+- ✅ UX Telegram moderna y funcional
+- ✅ Recordatorios duales operativos
+- ✅ Anti-solapamiento inteligente
+- ✅ IA integrada con fallbacks
+- ✅ Testing completo
+- ✅ Manejo robusto de errores
+- ✅ Configuración segura de secrets
+
+**Próximos pasos opcionales:**
+- Despliegue en servidor de producción
+- Integración con Google Calendar
+- Soporte multi-idioma adicional
+- Optimizaciones de rendimiento
 
 * `/start`
 * `/help`

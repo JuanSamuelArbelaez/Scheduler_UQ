@@ -29,12 +29,40 @@ class NotificationAgent:
 
     def build_agenda_message(self, events: list[Event], timezone_name: str = "America/Bogota") -> str:
         if not events:
-            return "No encontré eventos en tu agenda."
+            return "📅 No tienes eventos programados."
 
-        lines = ["Tu agenda actual es:"]
+        # Agrupar eventos por día
+        from collections import defaultdict
+        from datetime import date
+
+        events_by_date = defaultdict(list)
         for event in events:
             local_start = self._to_timezone(event.start_time, timezone_name)
-            lines.append(f"- {event.title}: {local_start:%d/%m/%Y a las %H:%M}")
+            event_date = local_start.date()
+            events_by_date[event_date].append((local_start, event))
+
+        # Ordenar fechas
+        sorted_dates = sorted(events_by_date.keys())
+
+        lines = ["📅 Tu agenda:"]
+        for event_date in sorted_dates:
+            day_events = events_by_date[event_date]
+            day_events.sort(key=lambda x: x[0])  # Ordenar por hora
+
+            # Nombre del día
+            today = date.today()
+            if event_date == today:
+                day_name = "Hoy"
+            elif event_date == today + timedelta(days=1):
+                day_name = "Mañana"
+            else:
+                day_name = event_date.strftime("%A %d/%m")
+
+            lines.append(f"\n🗓️ {day_name}:")
+
+            for local_start, event in day_events:
+                lines.append(f"⏰ {local_start:%H:%M}  {event.title}")
+
         return "\n".join(lines)
 
     def build_action_email_subject(self, action: str, event: Event) -> str:

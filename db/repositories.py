@@ -13,6 +13,13 @@ def _parse_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
 
+def _parse_json(value: str) -> dict[str, Any]:
+    try:
+        return json.loads(value) if value else {}
+    except json.JSONDecodeError:
+        return {}
+
+
 class UserRepository:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
@@ -72,8 +79,8 @@ class EventRepository:
     def create(self, event: Event) -> Event:
         cursor = self.connection.execute(
             """
-            INSERT INTO events (user_id, title, description, location, start_time, end_time, priority, status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO events (user_id, title, description, location, start_time, end_time, priority, status, source, timezone, created_at, updated_at, confirmed, metadata, recurrence_rule)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 event.user_id,
@@ -84,6 +91,13 @@ class EventRepository:
                 event.end_time.isoformat(),
                 event.priority,
                 event.status,
+                event.source,
+                event.timezone,
+                event.created_at.isoformat(),
+                event.updated_at.isoformat(),
+                1 if event.confirmed else 0,
+                json.dumps(event.metadata) if event.metadata else '{}',
+                event.recurrence_rule,
             ),
         )
         self.connection.commit()
@@ -108,7 +122,8 @@ class EventRepository:
         self.connection.execute(
             """
             UPDATE events
-            SET title = ?, description = ?, location = ?, start_time = ?, end_time = ?, priority = ?, status = ?
+            SET title = ?, description = ?, location = ?, start_time = ?, end_time = ?, priority = ?, status = ?,
+                source = ?, timezone = ?, updated_at = ?, confirmed = ?, metadata = ?, recurrence_rule = ?
             WHERE id = ?
             """,
             (
@@ -119,6 +134,12 @@ class EventRepository:
                 event.end_time.isoformat(),
                 event.priority,
                 event.status,
+                event.source,
+                event.timezone,
+                datetime.now().isoformat(),
+                1 if event.confirmed else 0,
+                json.dumps(event.metadata) if event.metadata else '{}',
+                event.recurrence_rule,
                 event.id,
             ),
         )
@@ -145,7 +166,33 @@ class EventRepository:
         row = self.connection.execute(query, params).fetchone()
         return row is not None
 
+    def get_overlapping(self, user_id: int, start_time: datetime, end_time: datetime, exclude_event_id: int | None = None) -> list[Event]:
+        """Devuelve lista de eventos que se solapan con la ventana temporal especificada"""
+        query = """
+            SELECT id, user_id, title, description, location, start_time, end_time, priority, status,
+                   source, timezone, created_at, updated_at, confirmed, metadata, recurrence_rule
+            FROM events
+            WHERE user_id = ?
+              AND status != 'cancelled'
+              AND start_time < ?
+              AND end_time > ?
+        """
+        params: list[object] = [user_id, end_time.isoformat(), start_time.isoformat()]
+        if exclude_event_id is not None:
+            query += " AND id != ?"
+            params.append(exclude_event_id)
+
+        rows = self.connection.execute(query, params).fetchall()
+        return [self._row_to_event(row) for row in rows]
+
     def _row_to_event(self, row: sqlite3.Row) -> Event:
+        # Helper function to safely get column values with defaults
+        def get_column(name: str, default=None):
+            try:
+                return row[name]
+            except KeyError:
+                return default
+
         return Event(
             id=row["id"],
             user_id=row["user_id"],
@@ -156,6 +203,13 @@ class EventRepository:
             end_time=_parse_datetime(row["end_time"]),
             priority=row["priority"],
             status=row["status"],
+            source=get_column("source", "telegram"),
+            timezone=get_column("timezone", "America/Bogota"),
+            created_at=_parse_datetime(get_column("created_at", row["start_time"])),
+            updated_at=_parse_datetime(get_column("updated_at", row["start_time"])),
+            confirmed=bool(get_column("confirmed", 0)),
+            metadata=_parse_json(get_column("metadata", "{}")),
+            recurrence_rule=get_column("recurrence_rule"),
         )
 
 
@@ -178,10 +232,12 @@ class ReminderRepository:
                 reminders.id AS reminder_id,
                 reminders.event_id AS event_id,
                 reminders.remind_at AS remind_at,
+                reminders.channel AS reminder_channel,
                 events.user_id AS user_id,
                 events.title AS event_title,
                 events.start_time AS event_start_time,
                 users.email AS user_email,
+                users.telegram_chat_id AS user_telegram_chat_id,
                 users.preferences AS user_preferences
             FROM reminders
             JOIN events ON events.id = reminders.event_id

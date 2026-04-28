@@ -40,6 +40,13 @@ class Database:
                     end_time TEXT NOT NULL,
                     priority INTEGER NOT NULL DEFAULT 3,
                     status TEXT NOT NULL DEFAULT 'scheduled',
+                    source TEXT NOT NULL DEFAULT 'telegram',
+                    timezone TEXT NOT NULL DEFAULT 'America/Bogota',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    confirmed INTEGER NOT NULL DEFAULT 0,
+                    metadata TEXT NOT NULL DEFAULT '{}',
+                    recurrence_rule TEXT,
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
 
@@ -47,7 +54,7 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     event_id INTEGER NOT NULL,
                     remind_at TEXT NOT NULL,
-                    channel TEXT NOT NULL DEFAULT 'telegram',
+                    channel TEXT NOT NULL DEFAULT 'both',
                     sent_at TEXT,
                     delivery_status TEXT,
                     FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE

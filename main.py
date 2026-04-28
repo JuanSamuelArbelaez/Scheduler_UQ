@@ -17,6 +17,7 @@ from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
 from services.email_service import EmailService, EmailSettings
 from services.local_llm import LocalOllamaClient
+from services.telegram_service import TelegramService
 
 
 def build_application() -> dict[str, object]:
@@ -49,11 +50,16 @@ def build_application() -> dict[str, object]:
 			use_tls=settings.smtp_use_tls,
 		)
 	)
+	telegram_service = None
+	if settings.telegram_bot_token:
+		telegram_service = TelegramService(settings.telegram_bot_token)
+
 	scheduling_agent = SchedulingAgent(
 		event_repository,
 		reminder_repository,
 		user_repository,
 		email_service,
+		telegram_service,
 		default_timezone=settings.default_timezone,
 		default_reminder_minutes=settings.default_reminder_minutes,
 	)
@@ -82,6 +88,7 @@ def build_application() -> dict[str, object]:
 			"history": history_agent,
 			"llm_client": llm_client,
 			"email_service": email_service,
+			"telegram_service": telegram_service,
 		},
 	}
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+from datetime import datetime
 from typing import Any
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -20,25 +21,32 @@ class LocalLlmDecision:
     clarification: str | None = None
 
 
-class LocalOllamaClient:
+class QwenClient:
+    """Cliente optimizado para Qwen 2.5 Instruct"""
+
     def __init__(self, base_url: str, model: str) -> None:
         self.base_url = base_url.rstrip("/")
         self.model = model
 
     def is_configured(self) -> bool:
-        return bool(self.model)
+        return bool(self.model and "qwen" in self.model.lower())
 
     def analyze(self, text: str, context: dict[str, Any] | None = None) -> LocalLlmDecision | None:
         if not self.is_configured():
             return None
 
-        prompt = self._build_prompt(text, context or {})
+        prompt = self._build_analysis_prompt(text, context or {})
         try:
             response = self._post_json("/api/generate", {
                 "model": self.model,
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
+                "options": {
+                    "temperature": 0.1,
+                    "top_p": 0.9,
+                    "num_predict": 512
+                }
             })
         except (URLError, TimeoutError, ValueError):
             return None
@@ -71,22 +79,19 @@ class LocalOllamaClient:
         if not self.is_configured():
             return None
 
-        prompt = (
-            "Clasifica la intencion de este texto para una agenda. "
-            "Devuelve solo JSON valido con la forma {\"intent\":\"create|read|update|delete|preferences|unknown\"}. "
-            f"Texto: {text}"
-        )
-
+        prompt = self._build_intent_prompt(text)
         try:
-            response = self._post_json(
-                "/api/generate",
-                {
-                    "model": self.model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "format": "json",
-                },
-            )
+            response = self._post_json("/api/generate", {
+                "model": self.model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {
+                    "temperature": 0.0,
+                    "top_p": 1.0,
+                    "num_predict": 128
+                }
+            })
         except (URLError, TimeoutError, ValueError):
             return None
 
@@ -106,7 +111,6 @@ class LocalOllamaClient:
 
     def list_models(self) -> list[str] | None:
         try:
-            # Use GET request for /api/tags endpoint
             with urlopen(f"{self.base_url}/api/tags", timeout=20) as response:
                 raw_body = response.read().decode("utf-8")
             response_data = json.loads(raw_body)
@@ -128,28 +132,97 @@ class LocalOllamaClient:
 
     def ensure_ready(self) -> tuple[bool, str]:
         if not self.is_configured():
-            return False, "OLLAMA_MODEL no está configurado"
+            return False, "Qwen model not configured"
 
         models = self.list_models()
         if models is None:
-            return False, "No se pudo conectar con Ollama"
+            return False, "Cannot connect to Ollama"
 
         if self.model in models:
-            return True, f"Ollama listo con modelo {self.model}"
+            return True, f"Qwen ready with model {self.model}"
 
         return False, (
-            f"El modelo configurado '{self.model}' no está disponible en Ollama. "
-            f"Modelos detectados: {', '.join(models) if models else 'ninguno'}"
+            f"Configured model '{self.model}' not available in Ollama. "
+            f"Available models: {', '.join(models) if models else 'none'}"
         )
 
-    def _build_prompt(self, text: str, context: dict[str, Any]) -> str:
-        return (
-            "Eres un asistente para una agenda. Devuelve JSON valido y solo JSON. "
-            "Campos permitidos: action(create|update|cancel|read|preferences|unknown), title, start, end, description, "
-            "event_id, title_query, needs_clarification, clarification. "
-            "Usa fechas ISO 8601 cuando sea posible. Si la solicitud es ambigua, activa needs_clarification y pregunta de forma breve. "
-            f"Contexto: {json.dumps(context, ensure_ascii=False)}. Texto: {text}"
-        )
+    def _build_analysis_prompt(self, text: str, context: dict[str, Any]) -> str:
+        """Prompt optimizado para Qwen 2.5 para análisis de agenda"""
+        user_timezone = context.get("user_timezone", "America/Bogota")
+        current_time = context.get("current_time", datetime.now().isoformat())
+
+        return f"""<|im_start|>system
+Eres un asistente inteligente para gestión de agendas en español. Tu tarea es analizar el texto del usuario y devolver una respuesta JSON estructurada.
+
+INSTRUCCIONES:
+- Analiza la intención del usuario sobre su agenda
+- Extrae información temporal precisa en español
+- Usa zona horaria: {user_timezone}
+- Hora actual: {current_time}
+- Si hay ambigüedad, pide aclaración breve
+- Devuelve SOLO JSON válido, sin texto adicional
+
+FORMATO DE RESPUESTA JSON:
+{{
+  "action": "create|update|cancel|read|preferences|unknown",
+  "title": "título del evento (opcional)",
+  "start": "fecha/hora inicio en ISO 8601 (opcional)",
+  "end": "fecha/hora fin en ISO 8601 (opcional)",
+  "description": "descripción (opcional)",
+  "event_id": número ID (opcional),
+  "title_query": "consulta por título (opcional)",
+  "needs_clarification": true/false,
+  "clarification": "mensaje de aclaración (opcional)"
+}}
+
+REGLAS TEMPORALES:
+- "hoy" = fecha actual
+- "mañana" = fecha actual + 1 día
+- "pasado mañana" = fecha actual + 2 días
+- Días de semana: lunes, martes, etc. (próximo si ya pasó)
+- Horas: 3pm = 15:00, 7:30 am = 07:30
+- Fechas: 20/04/2026, 2026-04-20
+- Si no se especifica duración, usar 1 hora por defecto
+
+EJEMPLOS:
+"Agenda reunión mañana a las 3pm" -> {{"action":"create","title":"reunión","start":"2026-04-21T15:00:00","end":"2026-04-21T16:00:00"}}
+"¿Qué tengo hoy?" -> {{"action":"read"}}
+"Mueve la reunión a las 5pm" -> {{"action":"update","title_query":"reunión","start":"2026-04-21T17:00:00"}}
+<|im_end|>
+<|im_start|>user
+Texto del usuario: {text}
+
+Contexto adicional: {json.dumps(context, ensure_ascii=False)}
+<|im_end|>
+<|im_start|>assistant
+"""
+
+    def _build_intent_prompt(self, text: str) -> str:
+        """Prompt optimizado para clasificación de intención con Qwen"""
+        return f"""<|im_start|>system
+Clasifica la intención del siguiente texto relacionado con una agenda.
+
+Devuelve SOLO JSON con el formato exacto:
+{{"intent": "create|read|update|delete|preferences|unknown"}}
+
+INTENCIONES:
+- create: crear/agendar nueva cita
+- read: consultar/ver agenda
+- update: modificar cita existente
+- delete: cancelar/eliminar cita
+- preferences: configurar email/zona horaria
+- unknown: no clasificable
+
+EJEMPLOS:
+"Agenda reunión mañana" -> {{"intent": "create"}}
+"¿Qué citas tengo?" -> {{"intent": "read"}}
+"Cambia la hora de la reunión" -> {{"intent": "update"}}
+<|im_end|>
+<|im_start|>user
+Texto: {text}
+<|im_end|>
+<|im_start|>assistant
+"""
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
         request = Request(
@@ -158,9 +231,13 @@ class LocalOllamaClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urlopen(request, timeout=20) as response:
+        with urlopen(request, timeout=30) as response:
             raw_body = response.read().decode("utf-8")
         return json.loads(raw_body)
+
+
+# Alias para compatibilidad
+LocalOllamaClient = QwenClient
 
 
 def _optional_str(value: Any) -> str | None:

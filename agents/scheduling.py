@@ -4,6 +4,7 @@ from db.repositories import EventRepository, ReminderRepository, UserRepository
 from models.entities import Event, Reminder
 from services.scheduler_service import ActionResult, SchedulerService
 from services.email_service import EmailService
+from services.telegram_service import TelegramService
 
 from .notification import NotificationAgent
 
@@ -17,6 +18,7 @@ class SchedulingAgent:
         reminders: ReminderRepository,
         users: UserRepository,
         email_service: EmailService,
+        telegram_service: TelegramService | None = None,
         default_timezone: str = "America/Bogota",
         default_reminder_minutes: int = 15,
     ) -> None:
@@ -28,12 +30,13 @@ class SchedulingAgent:
             users,
             self.notification,
             email_service,
+            telegram_service,
             default_timezone=default_timezone,
             default_reminder_minutes=default_reminder_minutes,
         )
 
     def create_event(self, event: Event) -> ActionResult:
-        return self.service.create_event(event)
+        return self.service.create_event_with_conflict_resolution(event)
 
     def update_event(self, event: Event) -> ActionResult:
         return self.service.update_event(event)

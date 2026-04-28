@@ -7,8 +7,13 @@ from typing import Final
 import unicodedata
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from telegram import Update
-from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import Application, ApplicationBuilder, CommandHandler, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+import html
+import json
+import logging
+import traceback
+from telegram.constants import ParseMode
 
 from agents.history import HistoryAgent
 from agents.intent import IntentType
@@ -57,6 +62,37 @@ class ParsedCancelRequest:
     title_query: str | None
 
 
+logger = logging.getLogger(__name__)
+
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Log the error and send a telegram message to notify the developer."""
+    # Log the error before we do anything else, so we can see it even if something breaks.
+    logger.error(msg="Exception while handling an update:", exc_info=context.error)
+
+    # traceback.format_exception returns the usual python message about an exception, but as a
+    # list of strings rather than a single string, so we have to join them together.
+    tb_list = traceback.format_exception(None, context.error, context.error.__traceback__)
+    tb_string = "".join(tb_list)
+
+    # Build the message with some markup and additional information about what happened.
+    # You might need to add some logic to deal with messages longer than the 4096 character limit.
+    update_str = update.to_dict() if isinstance(update, Update) else str(update)
+    message = (
+        f"An exception was raised while handling an update\n"
+        f"<pre>update = {html.escape(json.dumps(update_str, indent=2, ensure_ascii=False))}"
+        "</pre>\n\n"
+        f"<pre>context.chat_data = {html.escape(str(context.chat_data))}</pre>\n\n"
+        f"<pre>context.user_data = {html.escape(str(context.user_data))}</pre>\n\n"
+        f"<pre>{html.escape(tb_string)}</pre>"
+    )
+
+    # Finally, send the message
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id, text=message, parse_mode=ParseMode.HTML
+    )
+
+
 def build_application(token: str, dependencies: TelegramDependencies) -> Application:
     application = ApplicationBuilder().token(token).concurrent_updates(False).build()
     application.bot_data["dependencies"] = dependencies
@@ -68,6 +104,7 @@ def build_application(token: str, dependencies: TelegramDependencies) -> Applica
     application.add_handler(CommandHandler("create", create_command))
     application.add_handler(CommandHandler("update", update_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     application.add_error_handler(error_handler)
     if application.job_queue is not None:
@@ -81,11 +118,21 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     onboarding_hint = "Te voy a pedir tu email y zona horaria para activar recordatorios por correo."
     if user.email and dependencies.preferences.has_configured_timezone(user):
         onboarding_hint = "Tus preferencias ya están configuradas."
+
+    keyboard = [
+        [InlineKeyboardButton("📅 Ver Agenda", callback_data="menu_agenda")],
+        [InlineKeyboardButton("➕ Crear Cita", callback_data="menu_create")],
+        [InlineKeyboardButton("✏️ Modificar Cita", callback_data="menu_update")],
+        [InlineKeyboardButton("❌ Cancelar Cita", callback_data="menu_cancel")],
+        [InlineKeyboardButton("⚙️ Preferencias", callback_data="menu_preferences")],
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     message = (
-        "Scheduler listo. Puedes usar /agenda, /create, /update, /cancel y /health. "
-        f"Si envias texto libre, intentare clasificarlo con el Orchestrator. {onboarding_hint}"
+        "Scheduler listo. Elige una opción del menú o escribe texto libre.\n"
+        f"{onboarding_hint}"
     )
-    await update.effective_message.reply_text(message)
+    await update.effective_message.reply_text(message, reply_markup=reply_markup)
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -354,10 +401,119 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     )
 
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
-    message = "Ocurrió un error inesperado procesando tu solicitud. Inténtalo de nuevo."
-    if isinstance(update, Update) and update.effective_message is not None:
-        await update.effective_message.reply_text(message)
+async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    dependencies = _dependencies(context)
+    user = _ensure_user(update, dependencies)
+    data = query.data
+
+    if data == "menu_agenda":
+        timezone_name = dependencies.preferences.get_timezone(user)
+        events = dependencies.scheduling.list_agenda(user.id or 0)
+        message = dependencies.notification.build_agenda_message(events, timezone_name)
+        await query.edit_message_text(message)
+
+    elif data == "menu_create":
+        await query.edit_message_text(
+            "Para crear una cita, dime algo como:\n"
+            "• 'Reunión mañana a las 3pm'\n"
+            "• 'Cena con Ana el viernes 8pm'\n"
+            "• 'Dentista 20/04/2026 10:30'"
+        )
+
+    elif data == "menu_update":
+        events = dependencies.scheduling.list_agenda(user.id or 0)
+        if not events:
+            await query.edit_message_text("No tienes citas para modificar.")
+            return
+
+        keyboard = []
+        for event in events[:5]:  # Máximo 5 opciones
+            local_start = _to_user_timezone(event.start_time, dependencies.preferences.get_timezone(user))
+            button_text = f"{event.title} - {local_start:%d/%m %H:%M}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"update_{event.id}")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Selecciona la cita a modificar:", reply_markup=reply_markup)
+
+    elif data == "menu_cancel":
+        events = dependencies.scheduling.list_agenda(user.id or 0)
+        if not events:
+            await query.edit_message_text("No tienes citas para cancelar.")
+            return
+
+        keyboard = []
+        for event in events[:5]:  # Máximo 5 opciones
+            local_start = _to_user_timezone(event.start_time, dependencies.preferences.get_timezone(user))
+            button_text = f"{event.title} - {local_start:%d/%m %H:%M}"
+            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"cancel_{event.id}")])
+
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.edit_message_text("Selecciona la cita a cancelar:", reply_markup=reply_markup)
+
+    elif data == "menu_preferences":
+        user_prefs = dependencies.preferences.get_user(user.telegram_chat_id)
+        timezone_name = dependencies.preferences.get_timezone(user_prefs)
+        message = (
+            f"📧 Email: {user_prefs.email or 'no configurado'}\n"
+            f"🕐 Zona horaria: {timezone_name}\n\n"
+            "Para cambiar, dime:\n"
+            "• 'mi email es nombre@dominio.com'\n"
+            "• 'mi zona horaria es America/Bogota'"
+        )
+        await query.edit_message_text(message)
+
+    elif data.startswith("update_"):
+        event_id = int(data.split("_")[1])
+        context.user_data["pending_update_selection"] = event_id
+        await query.edit_message_text(
+            "Ahora dime la nueva fecha/hora. Ejemplos:\n"
+            "• 'mañana a las 5pm'\n"
+            "• 'el lunes 10:30'\n"
+            "• '2026-04-25 14:00'"
+        )
+
+    elif data.startswith("cancel_"):
+        event_id = int(data.split("_")[1])
+        try:
+            event = dependencies.scheduling.service.events.get_by_id(event_id)
+            context.user_data["pending_action"] = {"type": "cancel", "event_id": event_id}
+            local_start = _to_user_timezone(event.start_time, dependencies.preferences.get_timezone(user))
+
+            keyboard = [
+                [InlineKeyboardButton("✅ Sí, cancelar", callback_data="confirm_cancel")],
+                [InlineKeyboardButton("❌ No, mantener", callback_data="cancel_operation")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
+            await query.edit_message_text(
+                f"¿Confirmas cancelar '{event.title}' del {local_start:%d/%m/%Y a las %H:%M}?",
+                reply_markup=reply_markup
+            )
+        except LookupError:
+            await query.edit_message_text("Cita no encontrada.")
+
+    elif data == "confirm_cancel":
+        pending = context.user_data.get("pending_action")
+        if pending and pending.get("type") == "cancel":
+            try:
+                result = dependencies.scheduling.cancel_event(pending["event_id"])
+                dependencies.history.record(user.id or 0, "cancel", result.event.id if result.event else None, result.message)
+                await query.edit_message_text(f"✅ {result.message}")
+            except (ValueError, LookupError) as error:
+                await query.edit_message_text(f"❌ Error: {error}")
+        else:
+            await query.edit_message_text("❌ No hay acción pendiente.")
+        context.user_data.pop("pending_action", None)
+
+    elif data == "cancel_operation":
+        context.user_data.pop("pending_action", None)
+        await query.edit_message_text("❌ Operación cancelada.")
+
+    else:
+        await query.edit_message_text("Opción no reconocida.")
 
 
 async def _email_reminder_job(context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -557,27 +713,77 @@ def _split_payload(payload: str, expected_parts: int) -> list[str] | None:
 
 
 def _parse_datetime(value: str) -> datetime:
-    return datetime.fromisoformat(value)
+    """Parse datetime with enhanced Spanish expressions support"""
+    normalized = _normalize_text(value.strip())
+
+    # Handle Spanish time expressions
+    if normalized in ["mediodia", "mediodía"]:
+        return datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+    elif normalized in ["medianoche"]:
+        return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    elif normalized == "ahora":
+        return datetime.now()
+
+    # Handle relative dates
+    now = datetime.now()
+    if normalized == "hoy":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0)
+    elif normalized in ["manana", "mañana"]:
+        return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    elif normalized == "pasado":
+        return (now - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Handle day names
+    day_names = {
+        "lunes": 0, "martes": 1, "miercoles": 2, "miércoles": 2,
+        "jueves": 3, "viernes": 4, "sabado": 5, "sábado": 5, "domingo": 6
+    }
+    if normalized in day_names:
+        target_weekday = day_names[normalized]
+        current_weekday = now.weekday()
+        days_ahead = (target_weekday - current_weekday) % 7
+        if days_ahead == 0:  # Today
+            days_ahead = 7  # Next week
+        return (now + timedelta(days=days_ahead)).replace(hour=0, minute=0, second=0, microsecond=0)
+
+    # Try ISO format first
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        pass
+
+    # Try common formats
+    for fmt in ["%d/%m/%Y %H:%M", "%d/%m/%Y", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
+        try:
+            return datetime.strptime(value, fmt)
+        except ValueError:
+            continue
+
+    raise ValueError(f"No se pudo parsear la fecha/hora: {value}")
 
 
 def _parse_natural_create(text: str, reference_now: datetime | None = None) -> ParsedCreateRequest | None:
     normalized = _normalize_text(text)
-    day_match = re.search(
-        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+(?:a\s+las\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
-        normalized,
-    )
-    if day_match is None:
-        day_match = re.search(
-            r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<date>\d{4}-\d{2}-\d{2})\s+(?:a\s+las\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
-            normalized,
-        )
-    if day_match is None:
-        day_match = re.search(
-            r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade)\s+(?P<title>.+?)\s+(?:el\s+)?(?:(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+)?(?P<day_num>\d{1,2})\s+de\s+(?P<month_name>enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+de\s+(?P<year>\d{4})(?P<between>.*?)\s*(?:a\s+las\s+|a\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm)?",
-            normalized,
-        )
 
-    if day_match is None:
+    # Enhanced patterns with more Spanish expressions
+    patterns = [
+        # Pattern 1: "agendar reunión mañana a las 3pm"
+        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade|haz)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|pasado)\s+(?:a\s+las?\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm|de la manana|de la mañana|de la tarde|de la noche)?",
+        # Pattern 2: "reunión el 2024-04-25 a las 15:30"
+        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade|haz)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<date>\d{4}-\d{2}-\d{2})\s+(?:a\s+las?\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm|de la manana|de la mañana|de la tarde|de la noche)?",
+        # Pattern 3: "dentista el 25 de abril de 2024 a las 10:30"
+        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade|haz)\s+(?P<title>.+?)\s+(?:el\s+)?(?:(?:lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+)?(?P<day_num>\d{1,2})\s+de\s+(?P<month_name>enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(?:de\s+)?(?P<year>\d{4})(?P<between>.*?)\s*(?:a\s+las?\s+|a\s+)?(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm|de la manana|de la mañana|de la tarde|de la noche)?",
+        # Pattern 4: "reunión mañana al mediodía"
+        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade|haz)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<day>hoy|manana|mañana|lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo|pasado)\s+(?:a\s+|al\s+)(?P<time>mediodia|mediodía|medianoche)",
+        # Pattern 5: "cita hoy a las 14:00"
+        r"(?:agenda|agendar|programa|crear|crea|agrega|anade|añade|haz)\s+(?P<title>.+?)\s+(?:el\s+)?(?P<day>hoy|manana|mañana)\s+(?:a\s+las?\s+|a\s+)(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<ampm>am|pm|de la manana|de la mañana|de la tarde|de la noche)?"
+    ]
+
+    for pattern in patterns:
+        day_match = re.search(pattern, normalized, re.IGNORECASE)
+        if day_match:
+            break
+    else:
         return None
 
     title = day_match.group("title").strip(" .,")
@@ -589,13 +795,31 @@ def _parse_natural_create(text: str, reference_now: datetime | None = None) -> P
         return None
 
     try:
+        # Handle special time expressions
+        if "time" in day_match.groupdict() and day_match.group("time"):
+            time_expr = day_match.group("time").lower()
+            if time_expr in ["mediodia", "mediodía"]:
+                event_time = time(12, 0)
+            elif time_expr == "medianoche":
+                event_time = time(0, 0)
+            else:
+                event_time = time(9, 0)  # Default fallback
+        else:
+            event_time = _resolve_time(day_match.group("hour"), day_match.group("minute"), day_match.group("ampm"))
+
         event_date = _resolve_date(day_match.groupdict(), reference_now=reference_now)
-        event_time = _resolve_time(day_match.group("hour"), day_match.group("minute"), day_match.group("ampm"))
     except ValueError:
         return None
 
     start_time = datetime.combine(event_date, event_time)
-    return ParsedCreateRequest(title=title, start_time=start_time, end_time=start_time + timedelta(hours=1), description=None)
+    # Default duration: 1 hour, but can be smarter based on context
+    duration = timedelta(hours=1)
+    if "reunion" in title.lower() or "meeting" in title.lower():
+        duration = timedelta(hours=1)
+    elif "cita" in title.lower() or "consulta" in title.lower():
+        duration = timedelta(minutes=30)
+
+    return ParsedCreateRequest(title=title, start_time=start_time, end_time=start_time + duration, description=None)
 
 
 def _parse_natural_cancel_request(text: str) -> ParsedCancelRequest | None:
@@ -1003,64 +1227,79 @@ async def _handle_confirmation(
 
 
 def _resolve_date(values: dict[str, str | None], reference_now: datetime | None = None) -> date:
+    """Resolve date with enhanced Spanish expressions support"""
     today = (reference_now or datetime.now()).date()
+
+    # Handle ISO date
     if values.get("date"):
         return date.fromisoformat(values["date"] or "")
+
+    # Handle full date with month name
     if values.get("day_num") and values.get("month_name") and values.get("year"):
         month_map = {
-            "enero": 1,
-            "febrero": 2,
-            "marzo": 3,
-            "abril": 4,
-            "mayo": 5,
-            "junio": 6,
-            "julio": 7,
-            "agosto": 8,
-            "septiembre": 9,
-            "setiembre": 9,
-            "octubre": 10,
-            "noviembre": 11,
-            "diciembre": 12,
+            "enero": 1, "febrero": 2, "marzo": 3, "abril": 4, "mayo": 5, "junio": 6,
+            "julio": 7, "agosto": 8, "septiembre": 9, "setiembre": 9, "octubre": 10,
+            "noviembre": 11, "diciembre": 12,
         }
         month_value = month_map.get(_normalize_text(values["month_name"] or ""))
         if month_value is None:
-            raise ValueError("invalid month")
+            raise ValueError("Mes inválido")
         return date(year=int(values["year"] or "0"), month=month_value, day=int(values["day_num"] or "0"))
 
+    # Handle relative dates
     day_name = _normalize_text(values.get("day") or "")
-    if day_name in {"hoy"}:
+    if day_name == "hoy":
         return today
-    if day_name in {"manana", "mañana"}:
+    elif day_name in ["manana", "mañana"]:
         return today + timedelta(days=1)
+    elif day_name == "pasado":
+        return today - timedelta(days=1)
+    elif day_name == "anteayer":
+        return today - timedelta(days=2)
 
+    # Handle weekdays
     weekday_map = {
-        "lunes": 0,
-        "martes": 1,
-        "miercoles": 2,
-        "miércoles": 2,
-        "jueves": 3,
-        "viernes": 4,
-        "sabado": 5,
-        "sábado": 5,
-        "domingo": 6,
+        "lunes": 0, "martes": 1, "miercoles": 2, "miércoles": 2,
+        "jueves": 3, "viernes": 4, "sabado": 5, "sábado": 5, "domingo": 6,
     }
-    if day_name not in weekday_map:
-        return today
+    if day_name in weekday_map:
+        target_weekday = weekday_map[day_name]
+        current_weekday = today.weekday()
+        delta = (target_weekday - current_weekday) % 7
+        if delta == 0:  # Same day this week
+            return today + timedelta(days=7)  # Next week
+        return today + timedelta(days=delta)
 
-    target_weekday = weekday_map[day_name]
-    current_weekday = today.weekday()
-    delta = (target_weekday - current_weekday) % 7
-    return today + timedelta(days=delta)
+    # Default to today if nothing matches
+    return today
 
 
 def _resolve_time(hour_raw: str | None, minute_raw: str | None, ampm_raw: str | None) -> time:
+    """Resolve time with enhanced Spanish expressions support"""
     hour = int(hour_raw or "0")
     minute = int(minute_raw or "0")
-    ampm = (ampm_raw or "").lower()
-    if ampm == "pm" and hour < 12:
+    ampm = _normalize_text(ampm_raw or "")
+
+    # Handle Spanish time expressions
+    if ampm in ["de la manana", "de la mañana"]:
+        if hour < 12:
+            pass  # Keep as is
+    elif ampm in ["de la tarde", "de la noche"]:
+        if hour < 12:
+            hour += 12
+    elif ampm == "pm" and hour < 12:
         hour += 12
-    if ampm == "am" and hour == 12:
+    elif ampm == "am" and hour == 12:
         hour = 0
+    elif ampm == "pm" and hour == 12:
+        pass  # Keep as 12 PM
+
+    # Validate hour range
+    if not (0 <= hour <= 23):
+        raise ValueError(f"Hora inválida: {hour}")
+    if not (0 <= minute <= 59):
+        raise ValueError(f"Minutos inválidos: {minute}")
+
     return time(hour=hour, minute=minute)
 
 
