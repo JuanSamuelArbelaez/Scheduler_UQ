@@ -87,9 +87,19 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
         f"<pre>{html.escape(tb_string)}</pre>"
     )
 
+    # Determine chat_id: use update's chat if available, otherwise use bot owner's chat
+    if update and hasattr(update, 'effective_chat') and update.effective_chat:
+        chat_id = update.effective_chat.id
+    else:
+        # For jobs or other contexts without update, send to bot owner
+        # This assumes we have a way to get the bot owner's chat_id
+        # For now, we'll skip sending the message if no chat_id is available
+        logger.warning("Cannot send error message: no valid chat_id available")
+        return
+
     # Finally, send the message
     await context.bot.send_message(
-        chat_id=update.effective_chat.id, text=message, parse_mode=ParseMode.HTML
+        chat_id=chat_id, text=message, parse_mode=ParseMode.HTML
     )
 
 

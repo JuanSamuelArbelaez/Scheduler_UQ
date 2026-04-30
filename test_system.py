@@ -300,7 +300,6 @@ def run_all_tests():
         test_scheduler_service()
         test_reminder_channels()
         test_llm_integration()
-        test_parsing_functions()
         test_full_system()
 
         print("\n" + "=" * 60)

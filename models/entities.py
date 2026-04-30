@@ -18,10 +18,10 @@ class Event:
     id: int | None
     user_id: int
     title: str
-    description: str | None
-    location: str | None
     start_time: datetime
     end_time: datetime
+    description: str | None = None
+    location: str | None = None
     priority: int = 3
     status: str = "scheduled"
     source: str = "telegram"  # telegram, web, api
