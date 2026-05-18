@@ -48,9 +48,19 @@ Usuario → Telegram → **UX Moderna con Botones** → Orchestrator → NLP →
 
 ### 🔌 Flujo MCP - Google Calendar
 
-Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → MCP transport → Google Calendar
+Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → **MCP Server (puerto 8088)** → Google Calendar
 
-El calendario externo se asocia al email configurado durante onboarding. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
+**Componentes:**
+- **Servidor MCP** (`mcp_server/server.py`): JSON-RPC 2.0 sobre HTTP en puerto 8088
+- **GoogleCalendarService**: Interfaz con Google Calendar API (mock o real)
+- **MCPRPCRouter**: Enrutador de métodos JSON-RPC
+- **MCPCalendarHandler**: Manejador HTTP de solicitudes POST
+
+**Modos de operación:**
+1. **Mock Mode** (desarrollo/testing): Sin credenciales de Google, todas las operaciones simuladas
+2. **Production Mode** (producción): Con service account de Google, sincronización real
+
+El calendario se asocia al email configurado durante onboarding. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
 
 ---
 
@@ -285,15 +295,30 @@ Sistema de mensajes conversacionales en español:
 
 ## 15. Testing - SUITE COMPLETA
 
-**Pruebas implementadas:**
+**Pruebas de aplicación:**
 - ✅ **test_database_operations()** - CRUD completo
 - ✅ **test_scheduler_service()** - lógica de negocio
 - ✅ **test_reminder_channels()** - sistema multi-canal
+- ✅ **test_calendar_sync()** - sincronización MCP
 - ✅ **test_llm_integration()** - IA local
 - ✅ **test_parsing_functions()** - parsing de fechas
 - ✅ **test_full_system()** - integración completa
 
-**Cobertura:** Base de datos, servicios, agentes, integración LLM, parsing, sistema completo
+**Pruebas del servidor MCP:**
+- ✅ **test_server.py** (13 tests) - Lógica JSON-RPC, servicios de calendario, herramientas
+- ✅ **test_integration.py** (5 tests) - HTTP requests e2e al servidor MCP
+
+**Cobertura:** Base de datos, servicios, agentes, integración MCP, integración LLM, parsing, sistema completo
+
+**Ejecutar todas las pruebas:**
+```bash
+# Tests de aplicación
+python test_system.py
+
+# Tests del servidor MCP
+python mcp_server/test_server.py -v
+python mcp_server/test_integration.py -v
+```
 
 ---
 
@@ -307,7 +332,20 @@ Sistema de mensajes conversacionales en español:
 - ✅ Recordatorios duales operativos
 - ✅ Anti-solapamiento inteligente
 - ✅ IA integrada con fallbacks
+- ✅ **Servidor MCP para Google Calendar completamente funcional**
+  - Modo mock para testing
+  - Modo producción con service account de Google
+  - Todos los tests pasando (18 tests totales)
 - ✅ Testing completo
+
+**Inicio rápido en producción:**
+```bash
+# Terminal 1: Servidor MCP
+python mcp_server/run.py
+
+# Terminal 2: Bot Telegram
+python main.py
+```
 - ✅ Manejo robusto de errores
 - ✅ Configuración segura de secrets
 

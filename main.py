@@ -20,6 +20,7 @@ from services.email_service import EmailService, EmailSettings
 from services.local_llm import LocalOllamaClient
 from services.providers.mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider
 from services.telegram_service import TelegramService
+from telegram.error import Conflict
 
 
 def build_application() -> dict[str, object]:
@@ -165,7 +166,11 @@ def main() -> None:
 		)
 		telegram_application = build_telegram_application(settings.telegram_bot_token, dependencies)
 		print("Iniciando bot de Telegram con mensajes naturales y handlers de agenda.")
-		telegram_application.run_polling()
+		try:
+			telegram_application.run_polling()
+		except Conflict as error:
+			print(f"No se pudo iniciar el polling de Telegram: {error}")
+			print("Verifica que no haya otra instancia del bot ejecutándose o una sesión de getUpdates activa.")
 		return
 
 	print("Configuracion cargada correctamente. El siguiente paso es conectar el bot de Telegram.")

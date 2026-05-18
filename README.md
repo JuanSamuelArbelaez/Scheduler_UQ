@@ -87,18 +87,42 @@ SMTP_USE_TLS=true
 ```
 
 ### Google Calendar vía MCP
+
+El proyecto incluye un servidor MCP que sincroniza eventos con Google Calendar.
+
+**Inicio rápido (modo mock):**
+```bash
+# Terminal 1: Inicia el servidor MCP
+python mcp_server/run.py
+
+# Terminal 2: Inicia el bot
+python main.py
+```
+
+El servidor escucha en `http://localhost:8088/mcp` y los eventos se sincronizan automáticamente.
+
+**Variables de configuración:**
 ```bash
 MCP_ENABLED=true
-MCP_HTTP_ENDPOINT=http://localhost:8080/mcp
+MCP_HTTP_ENDPOINT=http://localhost:8088/mcp
 MCP_TIMEOUT_SECONDS=15
 MCP_RETRY_COUNT=2
 MCP_GOOGLE_CALENDAR_CREATE_TOOL=google_calendar.create_event
 MCP_GOOGLE_CALENDAR_UPDATE_TOOL=google_calendar.update_event
 MCP_GOOGLE_CALENDAR_DELETE_TOOL=google_calendar.delete_event
-GOOGLE_CALENDAR_ID=
+GOOGLE_CALENDAR_ID=tu_calendario@gmail.com
 ```
 
-Cuando esta integración está activa, Scheduler usa el email capturado en onboarding para asociar el calendario del usuario. Si el provider MCP falla, la agenda local sigue operando y la sincronización queda registrada en el historial.
+**Para sincronización real con Google Calendar:**
+1. Crea una cuenta de servicio en [Google Cloud Console](https://console.cloud.google.com)
+2. Descarga el JSON de credenciales
+3. Configura la variable de entorno:
+```bash
+export GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/service-account.json
+python mcp_server/run.py
+```
+
+Ver [mcp_server/README.md](mcp_server/README.md) para más detalles.
 
 ## 🎮 Uso en Telegram
 
