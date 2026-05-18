@@ -2,7 +2,7 @@
 
 ## 🎯 ¿Qué se logró?
 
-Se implementó un **servidor MCP completo** que sincroniza eventos de Telegram con Google Calendar. El servidor funciona en modo mock (sin credenciales) para testing, y modo producción (con Google service account) para sincronización real.
+Se implementó un **servidor MCP completo** que sincroniza eventos de Telegram con Google Calendar. El servidor funciona en modo mock (sin credenciales) para testing, y en producción se usa OAuth por usuario para enlazar cada calendario personal.
 
 ## ⚡ Inicio en 2 Minutos (Modo Mock)
 
@@ -70,20 +70,20 @@ mcp_server/
 ## 🚀 Para Producción: Google Calendar Real
 
 ```bash
-# 1. Crea una cuenta de servicio en https://console.cloud.google.com
-# 2. Descarga el JSON de credenciales
+# 1. Crea un OAuth Client ID en https://console.cloud.google.com
+# 2. Descarga el JSON de credenciales OAuth
 
 # 3. Configura la variable de entorno:
-export GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/service-account.json
+export GOOGLE_OAUTH_CLIENT_SECRETS_FILE=/path/to/oauth-client-secrets.json
 
-# 4. Inicia el servidor (ahora con sincronización real):
+# 4. Inicia el servidor MCP:
 python mcp_server/run.py
 
-# 5. Inicia el bot:
+# 5. Inicia el bot y completa el onboarding de Google Calendar desde Telegram:
 python main.py
 ```
 
-Los eventos ahora se sincronizarán en **tiempo real** con Google Calendar.
+Los eventos ahora se sincronizarán en **tiempo real** con el calendario personal autorizado por cada usuario.
 
 ## 🔍 Ver Logs
 

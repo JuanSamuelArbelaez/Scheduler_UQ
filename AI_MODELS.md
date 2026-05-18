@@ -26,7 +26,8 @@ Además, la integración externa de calendario se resuelve por MCP cuando está 
 
 * CalendarSyncService decide si sincronizar o caer a fallback local
 * MCPCalendarProvider encapsula Google Calendar y sus tools/templates/resources
-* El correo del usuario funciona como ancla de sincronización para el calendario asociado
+* La conexión a Google Calendar se obtiene por OAuth de usuario y se guarda por `user_id` en SQLite
+* MCP actúa como la capa de transporte desacoplada entre el runtime y Google Calendar
 * Si el provider o el transporte MCP fallan, la operación local sigue siendo válida
 
 ### Proveedores y versiones en runtime
@@ -66,6 +67,7 @@ pero ese modelo **no forma parte del runtime de producción** del bot.
 ## 4. MCP en runtime
 
 Cuando `MCP_ENABLED=true`, el runtime activa un provider de calendario externo desacoplado.
+El enlace de calendarios personales no usa una cuenta compartida: cada usuario autoriza su propio Google Calendar durante el onboarding de Telegram.
 
 ### Capacidades utilizadas
 
@@ -77,8 +79,8 @@ Cuando `MCP_ENABLED=true`, el runtime activa un provider de calendario externo d
 
 1. El bot interpreta el texto y ejecuta la operación local
 2. `SchedulerService` delega la sincronización externa a `CalendarSyncService`
-3. `CalendarSyncService` llama al provider MCP con el email del onboarding
-4. Si MCP responde bien, se registra la sincronización
+3. `CalendarSyncService` llama al provider MCP con el contexto del usuario autenticado
+4. Si MCP responde bien, se registra la sincronización en el calendario personal del usuario
 5. Si MCP falla, se mantiene la operación local y se registra el fallo
 
 ## 5. Evolución recomendada

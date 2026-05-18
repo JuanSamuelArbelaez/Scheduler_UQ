@@ -88,7 +88,7 @@ SMTP_USE_TLS=true
 
 ### Google Calendar vía MCP
 
-El proyecto incluye un servidor MCP que sincroniza eventos con Google Calendar.
+El proyecto incluye un servidor MCP que actúa como puente HTTP/JSON-RPC hacia Google Calendar. Scheduler usa esa capa para desacoplar la app de Telegram de la API externa y mantener la base local como fuente de verdad.
 
 **Inicio rápido (modo mock):**
 ```bash
@@ -99,7 +99,7 @@ python mcp_server/run.py
 python main.py
 ```
 
-El servidor escucha en `http://localhost:8088/mcp` y los eventos se sincronizan automáticamente.
+El servidor escucha en `http://localhost:8088/mcp` y los eventos se sincronizan automáticamente a través de MCP cuando la integración está habilitada.
 
 **Variables de configuración:**
 ```bash
@@ -111,16 +111,19 @@ MCP_GOOGLE_CALENDAR_CREATE_TOOL=google_calendar.create_event
 MCP_GOOGLE_CALENDAR_UPDATE_TOOL=google_calendar.update_event
 MCP_GOOGLE_CALENDAR_DELETE_TOOL=google_calendar.delete_event
 GOOGLE_CALENDAR_ID=tu_calendario@gmail.com
+GOOGLE_OAUTH_CLIENT_SECRETS_FILE=C:\ruta\a\oauth-client-secrets.json
+GOOGLE_OAUTH_REDIRECT_PORT=8765
 ```
 
 **Para sincronización real con Google Calendar:**
-1. Crea una cuenta de servicio en [Google Cloud Console](https://console.cloud.google.com)
-2. Descarga el JSON de credenciales
-3. Configura la variable de entorno:
-```bash
-export GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/service-account.json
-python mcp_server/run.py
-```
+1. Crea un proyecto en [Google Cloud Console](https://console.cloud.google.com)
+2. Habilita Google Calendar API
+3. Crea un OAuth Client ID para aplicación de escritorio
+4. Descarga el JSON de credenciales OAuth
+5. Configura `GOOGLE_OAUTH_CLIENT_SECRETS_FILE` en `.env`
+6. Inicia el bot y completa el onboarding desde Telegram para autorizar el calendario personal del usuario
+
+La conexión se guarda por usuario en SQLite y se usa para sincronizar sus eventos al calendario `primary` de Google, sin mezclar calendarios entre usuarios.
 
 Ver [mcp_server/README.md](mcp_server/README.md) para más detalles.
 

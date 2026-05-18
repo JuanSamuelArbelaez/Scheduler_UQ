@@ -140,7 +140,8 @@ Reglas de implementación:
 * Crear una capa `CalendarProvider` e implementaciones concretas en `services/providers`
 * Exponer `tools`, `templates` y `data sources` si el MCP server lo soporta
 * Sincronizar `create`, `update` y `delete` contra Google Calendar cuando `MCP_ENABLED=true`
-* Usar el email del onboarding como identificador de calendario del usuario
+* Usar OAuth de Google Calendar por usuario y sincronizar contra su calendario personal `primary`
+* Mantener el onboarding con un paso único de conexión a Google Calendar desde Telegram
 * Mantener `UTC` internamente y convertir con la zona horaria del usuario en límites de entrada y salida
 * Nunca bloquear operaciones locales por un fallo externo
 

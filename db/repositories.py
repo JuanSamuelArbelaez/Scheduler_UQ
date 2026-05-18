@@ -24,7 +24,14 @@ class UserRepository:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
 
+    def _sanitize_preferences(self, preferences: dict[str, Any]) -> dict[str, Any]:
+        sanitized = dict(preferences)
+        for key in ("google_calendar_oauth", "google_calendar_connected", "google_calendar_connected_at", "google_calendar_disconnected_at"):
+            sanitized.pop(key, None)
+        return sanitized
+
     def upsert(self, user: User) -> User:
+        preferences = self._sanitize_preferences(user.preferences)
         self.connection.execute(
             """
             INSERT INTO users (telegram_chat_id, email, preferences)
@@ -33,7 +40,7 @@ class UserRepository:
                 email = excluded.email,
                 preferences = excluded.preferences
             """,
-            (user.telegram_chat_id, user.email, json.dumps(user.preferences)),
+            (user.telegram_chat_id, user.email, json.dumps(preferences)),
         )
         self.connection.commit()
         return self.get_by_chat_id(user.telegram_chat_id)
@@ -45,31 +52,79 @@ class UserRepository:
         ).fetchone()
         if row is None:
             raise LookupError("User not found")
+        preferences = json.loads(row["preferences"] or "{}")
+        credentials = self.get_google_calendar_credentials(row["id"])
+        if credentials is not None:
+            preferences["google_calendar_oauth"] = credentials
+            preferences["google_calendar_connected"] = True
         return User(
             id=row["id"],
             telegram_chat_id=row["telegram_chat_id"],
             email=row["email"],
-            preferences=json.loads(row["preferences"] or "{}"),
+            preferences=preferences,
         )
 
     def get_by_id(self, user_id: int) -> User:
         row = self.connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if row is None:
             raise LookupError("User not found")
+        preferences = json.loads(row["preferences"] or "{}")
+        credentials = self.get_google_calendar_credentials(row["id"])
+        if credentials is not None:
+            preferences["google_calendar_oauth"] = credentials
+            preferences["google_calendar_connected"] = True
         return User(
             id=row["id"],
             telegram_chat_id=row["telegram_chat_id"],
             email=row["email"],
-            preferences=json.loads(row["preferences"] or "{}"),
+            preferences=preferences,
         )
 
     def update_email_and_preferences(self, user_id: int, email: str | None, preferences: dict[str, Any]) -> User:
+        sanitized_preferences = self._sanitize_preferences(preferences)
         self.connection.execute(
             "UPDATE users SET email = ?, preferences = ? WHERE id = ?",
-            (email, json.dumps(preferences), user_id),
+            (email, json.dumps(sanitized_preferences), user_id),
         )
         self.connection.commit()
         return self.get_by_id(user_id)
+
+    def set_google_calendar_credentials(self, user_id: int, credentials: dict[str, Any]) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO google_calendar_credentials (user_id, credentials_json, connected_at, updated_at)
+            VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id) DO UPDATE SET
+                credentials_json = excluded.credentials_json,
+                updated_at = CURRENT_TIMESTAMP
+            """,
+            (user_id, json.dumps(credentials)),
+        )
+        self.connection.commit()
+
+    def get_google_calendar_credentials(self, user_id: int) -> dict[str, Any] | None:
+        row = self.connection.execute(
+            "SELECT credentials_json FROM google_calendar_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        try:
+            credentials = json.loads(row["credentials_json"] or "{}")
+        except json.JSONDecodeError:
+            return None
+        return credentials if isinstance(credentials, dict) and credentials else None
+
+    def clear_google_calendar_credentials(self, user_id: int) -> None:
+        self.connection.execute("DELETE FROM google_calendar_credentials WHERE user_id = ?", (user_id,))
+        self.connection.commit()
+
+    def has_google_calendar_credentials(self, user_id: int) -> bool:
+        row = self.connection.execute(
+            "SELECT 1 FROM google_calendar_credentials WHERE user_id = ?",
+            (user_id,),
+        ).fetchone()
+        return row is not None
 
 
 class EventRepository:

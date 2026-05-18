@@ -4,14 +4,14 @@ A Model Context Protocol (MCP) server that provides JSON-RPC access to Google Ca
 
 ## Overview
 
-The MCP Calendar Server exposes Google Calendar create, update, and delete operations through a standard HTTP/JSON-RPC interface. It can be used to synchronize Scheduler UQ events with a Google Calendar account.
+The MCP Calendar Server exposes Google Calendar create, update, and delete operations through a standard HTTP/JSON-RPC interface. Scheduler UQ uses it as the transport layer between the Telegram runtime and Google Calendar, while OAuth credentials are managed per user in the app layer.
 
 ## Features
 
 - **JSON-RPC 2.0 Protocol**: Standard request/response format
 - **HTTP/1.1 Interface**: Simple POST-based communication at `/mcp` endpoint
 - **Mock Mode**: Works without Google credentials for testing
-- **Real Google Calendar Sync**: Production support with service account credentials
+- **Real Google Calendar Sync**: Production support with Google Calendar API credentials (used by the connected user flow in Scheduler UQ)
 - **Tool Discovery**: Exposes `tools/list`, `prompts/list`, `resources/list` methods
 - **Event Management**: Create, update, and delete calendar events
 
@@ -40,19 +40,13 @@ The server will start on `http://localhost:8088/mcp` in mock mode, where all ope
 
 ### Production Mode (Real Google Calendar)
 
-1. Create a Google Cloud service account and download the JSON credentials
-2. Set the environment variable:
+1. Create an OAuth client in Google Cloud Console and download the JSON credentials
+2. Configure the app with `GOOGLE_OAUTH_CLIENT_SECRETS_FILE`
+3. Start Scheduler UQ and complete the Google consent flow for each user from Telegram
+4. Keep the MCP server running so the app can route create/update/delete operations through HTTP/JSON-RPC
 
 ```bash
-export GOOGLE_SERVICE_ACCOUNT_FILE=/path/to/service-account.json
-export MCP_PORT=8088
 python mcp_server/run.py
-```
-
-Or pass via command line:
-
-```bash
-python mcp_server/server.py 8088 /path/to/service-account.json
 ```
 
 ## API Reference

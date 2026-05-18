@@ -99,6 +99,13 @@ class CalendarMCPTests(unittest.TestCase):
                 email TEXT,
                 preferences TEXT NOT NULL DEFAULT '{}'
             );
+            CREATE TABLE google_calendar_credentials (
+                user_id INTEGER PRIMARY KEY,
+                credentials_json TEXT NOT NULL,
+                connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            );
             CREATE TABLE events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -179,8 +186,41 @@ class CalendarMCPTests(unittest.TestCase):
         result = provider.create_event(event, self.user)
         self.assertTrue(result.success)
         self.assertEqual(transport.calls[0][0], "google_calendar.create_event")
-        self.assertEqual(transport.calls[0][1]["calendar_owner_email"], "user@example.com")
         self.assertEqual(transport.calls[0][1]["calendar_id"], "calendar@example.com")
+        self.assertEqual(transport.calls[0][1]["title"], "Reunión MCP")
+        self.assertIn("start_time_utc", transport.calls[0][1])
+        self.assertIn("end_time_utc", transport.calls[0][1])
+
+    def test_mcp_provider_includes_user_oauth_credentials(self) -> None:
+        transport = FakeTransport()
+        provider = MCPCalendarProvider(transport, default_calendar_id="primary")
+        self.users.set_google_calendar_credentials(
+            self.user.id or 0,
+            {
+                "token": "token-value",
+                "refresh_token": "refresh-value",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "client_id": "client-id",
+                "client_secret": "client-secret",
+                "scopes": ["https://www.googleapis.com/auth/calendar"],
+            },
+        )
+        connected_user = self.users.get_by_id(self.user.id or 0)
+
+        event = Event(
+            id=None,
+            user_id=connected_user.id or 0,
+            title="Evento personal",
+            start_time=datetime.now() + timedelta(hours=6),
+            end_time=datetime.now() + timedelta(hours=7),
+            description="demo",
+            location="online",
+        )
+
+        result = provider.create_event(event, connected_user)
+        self.assertTrue(result.success)
+        self.assertIn("oauth_credentials", transport.calls[0][1])
+        self.assertEqual(transport.calls[0][1]["oauth_credentials"]["token"], "token-value")
 
     def test_calendar_sync_service_falls_back_locally_and_logs_history(self) -> None:
         provider = FakeProvider()
@@ -205,6 +245,33 @@ class CalendarMCPTests(unittest.TestCase):
         self.assertIsNotNone(history_rows)
         self.assertIn("calendar_sync_create_failed", history_rows["action"])
         self.assertIn("fallback_used", history_rows["details"])
+
+    def test_calendar_sync_service_allows_users_without_email_when_connected(self) -> None:
+        provider = FakeProvider()
+        sync_service = CalendarSyncService(provider, history=self.history, retry_count=0)
+
+        user_without_email = self.users.upsert(
+            User(
+                id=None,
+                telegram_chat_id="chat-no-email",
+                email=None,
+                preferences={"timezone": "America/Bogota"},
+            )
+        )
+
+        event = Event(
+            id=None,
+            user_id=user_without_email.id or 0,
+            title="Reunión sin email",
+            start_time=datetime.now() + timedelta(hours=8),
+            end_time=datetime.now() + timedelta(hours=9),
+            description="demo",
+            location="online",
+        )
+
+        outcome = sync_service.sync_create(event, user_without_email)
+        self.assertTrue(outcome.success)
+        self.assertEqual(provider.calls[0][0], "create")
 
     def test_scheduler_service_sends_create_update_and_delete_to_calendar_sync(self) -> None:
         provider = FakeProvider()
@@ -234,6 +301,7 @@ class CalendarMCPTests(unittest.TestCase):
         self.assertIn("Sincronización Google Calendar", create_result.message)
 
         saved_event = self.events.list_by_user(self.user.id or 0)[0]
+        self.assertEqual(saved_event.metadata.get("google_calendar_event_id"), "ext-1")
         updated = Event(
             id=saved_event.id,
             user_id=self.user.id or 0,

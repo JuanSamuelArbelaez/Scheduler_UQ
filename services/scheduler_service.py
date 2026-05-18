@@ -326,5 +326,18 @@ class SchedulerService:
             return ""
 
         if outcome.success:
+            self._attach_external_calendar_id(event, outcome.result.external_id)
             return "Sincronización Google Calendar solicitada vía MCP."
         return "Sincronización Google Calendar no disponible; mantuve el guardado local."
+
+    def _attach_external_calendar_id(self, event: Event, external_id: str | None) -> None:
+        if not external_id or event.id is None:
+            return
+
+        metadata = dict(event.metadata or {})
+        if metadata.get("google_calendar_event_id") == external_id:
+            return
+
+        metadata["google_calendar_event_id"] = external_id
+        event.metadata = metadata
+        self.events.update(event)

@@ -17,6 +17,7 @@ from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
 from services.calendar_sync_service import CalendarSyncService
 from services.email_service import EmailService, EmailSettings
+from services.google_calendar_oauth import GoogleCalendarOAuthManager
 from services.local_llm import LocalOllamaClient
 from services.providers.mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider
 from services.telegram_service import TelegramService
@@ -87,6 +88,18 @@ def build_application() -> dict[str, object]:
 		default_reminder_minutes=settings.default_reminder_minutes,
 	)
 	preferences_agent = UserPreferencesAgent(user_repository, default_timezone=settings.default_timezone)
+	oauth_manager = GoogleCalendarOAuthManager(
+		preferences_agent,
+		client_secrets_file=settings.google_oauth_client_secrets_file,
+		redirect_host=settings.google_oauth_redirect_host,
+		redirect_port=settings.google_oauth_redirect_port,
+		scopes=settings.google_oauth_scopes,
+		telegram_bot_token=settings.telegram_bot_token,
+	)
+	if oauth_manager.is_configured():
+		oauth_manager.start_callback_server()
+	else:
+		print("Google OAuth no está configurado: falta GOOGLE_OAUTH_CLIENT_SECRETS_FILE o el archivo no existe.")
 
 	return {
 		"settings": settings,
@@ -111,6 +124,7 @@ def build_application() -> dict[str, object]:
 			"llm_client": llm_client,
 			"email_service": email_service,
 			"telegram_service": telegram_service,
+			"oauth_manager": oauth_manager,
 		},
 	}
 
@@ -163,6 +177,7 @@ def main() -> None:
 			history=application["agents"]["history"],
 			llm_client=application["agents"]["llm_client"],
 			default_timezone=settings.default_timezone,
+			oauth_manager=application["agents"]["oauth_manager"],
 		)
 		telegram_application = build_telegram_application(settings.telegram_bot_token, dependencies)
 		print("Iniciando bot de Telegram con mensajes naturales y handlers de agenda.")

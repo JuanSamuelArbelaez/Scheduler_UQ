@@ -33,6 +33,10 @@ class AppSettings:
     mcp_list_templates_method: str = "prompts/list"
     mcp_list_resources_method: str = "resources/list"
     google_calendar_calendar_id: str = ""
+    google_oauth_client_secrets_file: str = ""
+    google_oauth_redirect_host: str = "127.0.0.1"
+    google_oauth_redirect_port: int = 8765
+    google_oauth_scopes: str = "https://www.googleapis.com/auth/calendar"
 
 
 def load_settings() -> AppSettings:
@@ -62,6 +66,13 @@ def load_settings() -> AppSettings:
     mcp_list_templates_method = os.getenv("MCP_LIST_TEMPLATES_METHOD", "prompts/list").strip()
     mcp_list_resources_method = os.getenv("MCP_LIST_RESOURCES_METHOD", "resources/list").strip()
     google_calendar_calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "").strip()
+    google_oauth_client_secrets_file = os.getenv("GOOGLE_OAUTH_CLIENT_SECRETS_FILE", "").strip()
+    google_oauth_redirect_host = os.getenv("GOOGLE_OAUTH_REDIRECT_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    google_oauth_redirect_port = int(os.getenv("GOOGLE_OAUTH_REDIRECT_PORT", "8765"))
+    google_oauth_scopes = os.getenv(
+        "GOOGLE_OAUTH_SCOPES",
+        "https://www.googleapis.com/auth/calendar",
+    ).strip() or "https://www.googleapis.com/auth/calendar"
 
     return AppSettings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -90,6 +101,10 @@ def load_settings() -> AppSettings:
         mcp_list_templates_method=mcp_list_templates_method,
         mcp_list_resources_method=mcp_list_resources_method,
         google_calendar_calendar_id=google_calendar_calendar_id,
+        google_oauth_client_secrets_file=google_oauth_client_secrets_file,
+        google_oauth_redirect_host=google_oauth_redirect_host,
+        google_oauth_redirect_port=google_oauth_redirect_port,
+        google_oauth_scopes=google_oauth_scopes,
     )
 
 

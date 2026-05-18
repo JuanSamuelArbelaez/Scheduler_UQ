@@ -48,7 +48,9 @@ Usuario → Telegram → **UX Moderna con Botones** → Orchestrator → NLP →
 
 ### 🔌 Flujo MCP - Google Calendar
 
-Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → **MCP Server (puerto 8088)** → Google Calendar
+Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → **MCP Server (puerto 8088)** → Google Calendar personal del usuario
+
+La capa MCP se usa como transporte desacoplado para ejecutar las operaciones de calendario; el onboarding en Telegram captura el OAuth del usuario y lo asocia a su cuenta para que cada persona sincronice su propio calendario `primary`.
 
 **Componentes:**
 - **Servidor MCP** (`mcp_server/server.py`): JSON-RPC 2.0 sobre HTTP en puerto 8088
@@ -57,10 +59,12 @@ Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncServi
 - **MCPCalendarHandler**: Manejador HTTP de solicitudes POST
 
 **Modos de operación:**
-1. **Mock Mode** (desarrollo/testing): Sin credenciales de Google, todas las operaciones simuladas
-2. **Production Mode** (producción): Con service account de Google, sincronización real
+1. **Mock Mode** (desarrollo/testing): Sin credenciales OAuth de Google, todas las operaciones simuladas
+2. **Production Mode** (producción): Con OAuth por usuario, sincronización real en el calendario personal `primary`
 
-El calendario se asocia al email configurado durante onboarding. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
+El onboarding configura email, zona horaria y la conexión OAuth a Google Calendar desde Telegram. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
+
+Este diseño evita un calendario compartido: la relación de credenciales se guarda por `user_id` y la sincronización se dispara solo para el usuario que autorizó su cuenta.
 
 ---
 

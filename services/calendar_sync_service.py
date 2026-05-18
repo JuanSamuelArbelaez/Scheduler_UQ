@@ -59,8 +59,8 @@ class CalendarSyncService:
         return self._sync("delete", event, user)
 
     def _sync(self, action: str, event: Event, user: User) -> CalendarSyncOutcome:
-        if not self.provider.is_available() or not (user.email or "").strip():
-            result = self._fallback_result(action, event, user, "MCP deshabilitado o sin correo de calendario")
+        if not self.provider.is_available():
+            result = self._fallback_result(action, event, user, "MCP deshabilitado")
             self._record_history(action, event, user, result)
             return CalendarSyncOutcome(result=result, retries=0)
 
@@ -120,10 +120,26 @@ class CalendarSyncService:
             "fallback_used": result.fallback_used,
             "message": result.message,
             "external_id": result.external_id,
-            "payload": result.payload,
+            "payload": self._redact_sensitive_payload(result.payload),
             "capabilities": asdict(result.capabilities),
         }
         try:
             self.history.record(user.id or 0, history_action, event.id, json.dumps(details, ensure_ascii=False))
         except Exception as error:
             logger.warning("No se pudo registrar historial de sincronización MCP: %s", error)
+
+    def _redact_sensitive_payload(self, payload: dict[str, object]) -> dict[str, object]:
+        def scrub(value: object) -> object:
+            if isinstance(value, dict):
+                redacted: dict[str, object] = {}
+                for key, nested_value in value.items():
+                    if key in {"oauth_credentials", "google_calendar_oauth"}:
+                        redacted[key] = "[redacted]"
+                    else:
+                        redacted[key] = scrub(nested_value)
+                return redacted
+            if isinstance(value, list):
+                return [scrub(item) for item in value]
+            return value
+
+        return scrub(payload) if isinstance(payload, dict) else {}

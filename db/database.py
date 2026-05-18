@@ -11,7 +11,7 @@ class Database:
         self.path = path
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path)
+        connection = sqlite3.connect(self.path, check_same_thread=False)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA trusted_schema = OFF")
@@ -20,7 +20,7 @@ class Database:
         return connection
 
     def initialize(self) -> None:
-        with sqlite3.connect(self.path) as connection:
+        with sqlite3.connect(self.path, check_same_thread=False) as connection:
             connection.executescript(
                 """
                 CREATE TABLE IF NOT EXISTS users (
@@ -28,6 +28,14 @@ class Database:
                     telegram_chat_id TEXT NOT NULL UNIQUE,
                     email TEXT,
                     preferences TEXT NOT NULL DEFAULT '{}'
+                );
+
+                CREATE TABLE IF NOT EXISTS google_calendar_credentials (
+                    user_id INTEGER PRIMARY KEY,
+                    credentials_json TEXT NOT NULL,
+                    connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
 
                 CREATE TABLE IF NOT EXISTS events (

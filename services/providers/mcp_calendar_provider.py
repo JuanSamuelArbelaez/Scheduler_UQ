@@ -131,6 +131,14 @@ class MCPCalendarProvider(CalendarProvider):
         if self.transport is None or not self.transport.is_available():
             return self._fallback_result(action, event, user, "MCP no disponible")
 
+        if action in {"update", "delete"} and not self._resolve_external_event_id(event):
+            return self._fallback_result(
+                action,
+                event,
+                user,
+                "event_id de Google no disponible; crea el evento primero para enlazarlo",
+            )
+
         payload = self._build_payload(action, event, user)
         try:
             response = self.transport.call_tool(tool_name, payload)
@@ -165,28 +173,47 @@ class MCPCalendarProvider(CalendarProvider):
         )
 
     def _build_payload(self, action: str, event: Event, user: User) -> dict[str, Any]:
-        timezone_name = str(user.preferences.get("timezone") or event.timezone or "UTC")
-        calendar_id = (self.default_calendar_id or user.email or "").strip()
+        calendar_id = (self.default_calendar_id or "primary").strip()
         source_dt = event.start_time if event.start_time.tzinfo is not None else event.start_time.replace(tzinfo=UTC)
         end_dt = event.end_time if event.end_time.tzinfo is not None else event.end_time.replace(tzinfo=UTC)
-        return {
-            "action": action,
-            "event": {
-                "id": event.id,
-                "user_id": user.id,
-                "title": event.title,
-                "description": event.description,
-                "location": event.location,
-                "start_time_utc": source_dt.astimezone(UTC).isoformat(),
-                "end_time_utc": end_dt.astimezone(UTC).isoformat(),
-                "timezone": timezone_name,
-                "confirmed": event.confirmed,
-                "metadata": event.metadata,
-            },
-            "calendar_owner_email": (user.email or "").strip(),
-            "calendar_id": calendar_id,
-            "source": event.source,
+        payload: dict[str, Any] = {
+            "calendar_id": calendar_id or "primary",
+            "title": event.title,
+            "start_time_utc": source_dt.astimezone(UTC).isoformat(),
+            "end_time_utc": end_dt.astimezone(UTC).isoformat(),
+            "description": event.description,
+            "location": event.location,
         }
+
+        oauth_credentials = None
+        if isinstance(user.preferences, dict):
+            raw_credentials = user.preferences.get("google_calendar_oauth")
+            if isinstance(raw_credentials, dict) and raw_credentials:
+                oauth_credentials = raw_credentials
+        if oauth_credentials is not None:
+            payload["oauth_credentials"] = oauth_credentials
+
+        if action in {"update", "delete"}:
+            payload["event_id"] = self._resolve_external_event_id(event)
+
+        if action == "delete":
+            # API only requires identifiers for delete; avoid sending extra fields.
+            return {
+                "calendar_id": payload["calendar_id"],
+                "event_id": payload["event_id"],
+            }
+
+        return payload
+
+    def _resolve_external_event_id(self, event: Event) -> str | None:
+        metadata = event.metadata if isinstance(event.metadata, dict) else {}
+        for key in ("google_calendar_event_id", "external_id", "event_id", "calendar_event_id"):
+            raw_value = metadata.get(key)
+            if isinstance(raw_value, str) and raw_value.strip():
+                return raw_value.strip()
+            if isinstance(raw_value, int):
+                return str(raw_value)
+        return None
 
     def _extract_names(self, response: dict[str, Any]) -> list[str]:
         raw_items = response.get("tools") or response.get("prompts") or response.get("resources") or []
