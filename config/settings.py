@@ -22,6 +22,17 @@ class AppSettings:
     smtp_password: str = ""
     smtp_from_email: str = ""
     smtp_use_tls: bool = True
+    mcp_enabled: bool = False
+    mcp_http_endpoint: str = ""
+    mcp_timeout_seconds: int = 15
+    mcp_retry_count: int = 2
+    mcp_google_calendar_create_tool: str = "google_calendar.create_event"
+    mcp_google_calendar_update_tool: str = "google_calendar.update_event"
+    mcp_google_calendar_delete_tool: str = "google_calendar.delete_event"
+    mcp_list_tools_method: str = "tools/list"
+    mcp_list_templates_method: str = "prompts/list"
+    mcp_list_resources_method: str = "resources/list"
+    google_calendar_calendar_id: str = ""
 
 
 def load_settings() -> AppSettings:
@@ -40,6 +51,17 @@ def load_settings() -> AppSettings:
     smtp_password = os.getenv("SMTP_PASSWORD", "").strip()
     smtp_from_email = os.getenv("SMTP_FROM_EMAIL", "").strip()
     smtp_use_tls = _parse_bool(os.getenv("SMTP_USE_TLS", "true"))
+    mcp_enabled = _parse_bool(os.getenv("MCP_ENABLED", "false"))
+    mcp_http_endpoint = os.getenv("MCP_HTTP_ENDPOINT", "").strip()
+    mcp_timeout_seconds = int(os.getenv("MCP_TIMEOUT_SECONDS", "15"))
+    mcp_retry_count = int(os.getenv("MCP_RETRY_COUNT", "2"))
+    mcp_google_calendar_create_tool = os.getenv("MCP_GOOGLE_CALENDAR_CREATE_TOOL", "google_calendar.create_event").strip()
+    mcp_google_calendar_update_tool = os.getenv("MCP_GOOGLE_CALENDAR_UPDATE_TOOL", "google_calendar.update_event").strip()
+    mcp_google_calendar_delete_tool = os.getenv("MCP_GOOGLE_CALENDAR_DELETE_TOOL", "google_calendar.delete_event").strip()
+    mcp_list_tools_method = os.getenv("MCP_LIST_TOOLS_METHOD", "tools/list").strip()
+    mcp_list_templates_method = os.getenv("MCP_LIST_TEMPLATES_METHOD", "prompts/list").strip()
+    mcp_list_resources_method = os.getenv("MCP_LIST_RESOURCES_METHOD", "resources/list").strip()
+    google_calendar_calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "").strip()
 
     return AppSettings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -57,6 +79,17 @@ def load_settings() -> AppSettings:
         smtp_password=smtp_password,
         smtp_from_email=smtp_from_email,
         smtp_use_tls=smtp_use_tls,
+        mcp_enabled=mcp_enabled,
+        mcp_http_endpoint=mcp_http_endpoint,
+        mcp_timeout_seconds=mcp_timeout_seconds,
+        mcp_retry_count=mcp_retry_count,
+        mcp_google_calendar_create_tool=mcp_google_calendar_create_tool,
+        mcp_google_calendar_update_tool=mcp_google_calendar_update_tool,
+        mcp_google_calendar_delete_tool=mcp_google_calendar_delete_tool,
+        mcp_list_tools_method=mcp_list_tools_method,
+        mcp_list_templates_method=mcp_list_templates_method,
+        mcp_list_resources_method=mcp_list_resources_method,
+        google_calendar_calendar_id=google_calendar_calendar_id,
     )
 
 

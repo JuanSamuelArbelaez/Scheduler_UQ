@@ -78,7 +78,7 @@ Cada agente debe ser independiente:
 
 ---
 
-### 4. Persistencia
+### 5. Persistencia
 
 * Usar SQLite
 * Separar lógica de acceso a datos (DAO / Repository)
@@ -86,7 +86,7 @@ Cada agente debe ser independiente:
 
 ---
 
-### 5. Manejo de Errores
+### 6. Manejo de Errores
 
 * Manejar excepciones explícitamente
 * Nunca romper el flujo del sistema
@@ -95,7 +95,7 @@ Cada agente debe ser independiente:
 
 ---
 
-### 6. Confirmaciones
+### 7. Confirmaciones
 
 Antes de ejecutar acciones críticas:
 
@@ -105,11 +105,11 @@ Antes de ejecutar acciones críticas:
 
 → SIEMPRE pedir confirmación explícita
 
-### 7. Respuestas Naturales
+### 8. Respuestas Naturales
 
 Después de crear, modificar o cancelar una cita, devolver un mensaje en lenguaje natural describiendo la acción realizada.
 
-### 8. Seguridad de Datos
+### 9. Seguridad de Datos
 
 * Usar siempre SQL parametrizado
 * Evitar payloads peligrosos en campos de texto de eventos
@@ -130,6 +130,30 @@ Debes trabajar con estos agentes:
 * Confirmation Agent
 * User Preferences Agent
 * History Agent
+
+## ☁️ MCP / Google Calendar
+
+La arquitectura actual debe mantener la capa local como fuente de verdad y sumar MCP como proveedor opcional para Google Calendar.
+
+Reglas de implementación:
+
+* Crear una capa `CalendarProvider` e implementaciones concretas en `services/providers`
+* Exponer `tools`, `templates` y `data sources` si el MCP server lo soporta
+* Sincronizar `create`, `update` y `delete` contra Google Calendar cuando `MCP_ENABLED=true`
+* Usar el email del onboarding como identificador de calendario del usuario
+* Mantener `UTC` internamente y convertir con la zona horaria del usuario en límites de entrada y salida
+* Nunca bloquear operaciones locales por un fallo externo
+
+Variables esperadas:
+
+* `MCP_ENABLED`
+* `MCP_HTTP_ENDPOINT`
+* `MCP_TIMEOUT_SECONDS`
+* `MCP_RETRY_COUNT`
+* `MCP_GOOGLE_CALENDAR_CREATE_TOOL`
+* `MCP_GOOGLE_CALENDAR_UPDATE_TOOL`
+* `MCP_GOOGLE_CALENDAR_DELETE_TOOL`
+* `GOOGLE_CALENDAR_ID`
 
 ---
 

@@ -35,6 +35,10 @@ class UserPreferencesAgent:
         timezone_name = str(user.preferences.get("timezone") or "").strip()
         return timezone_name or self.default_timezone
 
+    def get_calendar_email(self, user: User) -> str | None:
+        email = (user.email or "").strip()
+        return email or None
+
     def has_configured_timezone(self, user: User) -> bool:
         timezone_name = str(user.preferences.get("timezone") or "").strip()
         return bool(timezone_name)

@@ -22,6 +22,13 @@ Esto significa que:
 * Priority Agent usa reglas por palabras de urgencia
 * Confirmation Agent usa reglas de negocio para confirmar acciones críticas
 
+Además, la integración externa de calendario se resuelve por MCP cuando está habilitada:
+
+* CalendarSyncService decide si sincronizar o caer a fallback local
+* MCPCalendarProvider encapsula Google Calendar y sus tools/templates/resources
+* El correo del usuario funciona como ancla de sincronización para el calendario asociado
+* Si el provider o el transporte MCP fallan, la operación local sigue siendo válida
+
 ### Proveedores y versiones en runtime
 
 * Proveedor LLM remoto: ninguno
@@ -54,8 +61,27 @@ pero ese modelo **no forma parte del runtime de producción** del bot.
 * Confirmation Agent: política de confirmación explícita
 * User Preferences Agent: persistencia de preferencias en SQLite
 * History Agent: auditoría de acciones en SQLite
+* Calendar Sync Service: coordinación de sincronización externa con MCP y fallback local
 
-## 4. Evolución recomendada
+## 4. MCP en runtime
+
+Cuando `MCP_ENABLED=true`, el runtime activa un provider de calendario externo desacoplado.
+
+### Capacidades utilizadas
+
+* `tools`: create/update/delete para Google Calendar
+* `templates`: plantillas de eventos y mensajes de sincronización
+* `data sources`: email del usuario, zona horaria y metadatos de agenda
+
+### Flujo de decisión
+
+1. El bot interpreta el texto y ejecuta la operación local
+2. `SchedulerService` delega la sincronización externa a `CalendarSyncService`
+3. `CalendarSyncService` llama al provider MCP con el email del onboarding
+4. Si MCP responde bien, se registra la sincronización
+5. Si MCP falla, se mantiene la operación local y se registra el fallo
+
+## 5. Evolución recomendada
 
 Si se integra un LLM en runtime, se recomienda:
 

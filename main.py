@@ -15,8 +15,10 @@ from bot.telegram_app import TelegramDependencies, build_application as build_te
 from config.settings import load_settings
 from db.database import Database
 from db.repositories import EventRepository, HistoryRepository, ReminderRepository, UserRepository
+from services.calendar_sync_service import CalendarSyncService
 from services.email_service import EmailService, EmailSettings
 from services.local_llm import LocalOllamaClient
+from services.providers.mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider
 from services.telegram_service import TelegramService
 
 
@@ -39,7 +41,22 @@ def build_application() -> dict[str, object]:
 	priority_agent = PriorityAgent()
 	confirmation_agent = ConfirmationAgent()
 	notification_agent = NotificationAgent()
-	orchestrator_agent = OrchestratorAgent(nlp_agent, intent_agent, priority_agent, confirmation_agent)
+	calendar_provider = None
+	calendar_sync_service = None
+	if settings.mcp_enabled and settings.mcp_http_endpoint:
+		transport = HttpJsonRpcMCPTransport(settings.mcp_http_endpoint, timeout_seconds=settings.mcp_timeout_seconds)
+		calendar_provider = MCPCalendarProvider(
+			transport,
+			create_tool=settings.mcp_google_calendar_create_tool,
+			update_tool=settings.mcp_google_calendar_update_tool,
+			delete_tool=settings.mcp_google_calendar_delete_tool,
+			list_tools_method=settings.mcp_list_tools_method,
+			list_templates_method=settings.mcp_list_templates_method,
+			list_resources_method=settings.mcp_list_resources_method,
+			default_calendar_id=settings.google_calendar_calendar_id,
+		)
+		calendar_sync_service = CalendarSyncService(calendar_provider, history=None, retry_count=settings.mcp_retry_count)
+	orchestrator_agent = OrchestratorAgent(nlp_agent, intent_agent, priority_agent, confirmation_agent, calendar_provider=calendar_provider)
 	email_service = EmailService(
 		EmailSettings(
 			host=settings.smtp_host,
@@ -53,6 +70,9 @@ def build_application() -> dict[str, object]:
 	telegram_service = None
 	if settings.telegram_bot_token:
 		telegram_service = TelegramService(settings.telegram_bot_token)
+	history_agent = HistoryAgent(history_repository)
+	if calendar_sync_service is not None:
+		calendar_sync_service.history = history_agent
 
 	scheduling_agent = SchedulingAgent(
 		event_repository,
@@ -60,11 +80,12 @@ def build_application() -> dict[str, object]:
 		user_repository,
 		email_service,
 		telegram_service,
+		history=history_agent,
+		calendar_sync=calendar_sync_service,
 		default_timezone=settings.default_timezone,
 		default_reminder_minutes=settings.default_reminder_minutes,
 	)
 	preferences_agent = UserPreferencesAgent(user_repository, default_timezone=settings.default_timezone)
-	history_agent = HistoryAgent(history_repository)
 
 	return {
 		"settings": settings,

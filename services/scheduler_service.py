@@ -10,6 +10,8 @@ from models.entities import Event, Reminder
 from agents.notification import NotificationAgent
 from services.email_service import EmailService
 from services.telegram_service import TelegramService
+from services.calendar_sync_service import CalendarSyncService
+from agents.history import HistoryAgent
 
 
 @dataclass(slots=True)
@@ -28,6 +30,8 @@ class SchedulerService:
         notification: NotificationAgent,
         email_service: EmailService,
         telegram_service: TelegramService | None = None,
+        history: HistoryAgent | None = None,
+        calendar_sync: CalendarSyncService | None = None,
         default_timezone: str = "America/Bogota",
         default_reminder_minutes: int = 15,
     ) -> None:
@@ -37,6 +41,8 @@ class SchedulerService:
         self.notification = notification
         self.email_service = email_service
         self.telegram_service = telegram_service
+        self.history = history
+        self.calendar_sync = calendar_sync
         self.default_timezone = default_timezone
         self.default_reminder_minutes = default_reminder_minutes
 
@@ -78,6 +84,10 @@ class SchedulerService:
                     f"{self._to_user_timezone(new_start, timezone_name):%d/%m %H:%M}."
                 )
 
+                sync_message = self._sync_calendar_message("create", created_event)
+                if sync_message:
+                    message = f"{message} {sync_message}"
+
                 self._notify_action_email("create", created_event, timezone_name)
                 return ActionResult(created_event, created_reminder, message)
             else:
@@ -91,6 +101,9 @@ class SchedulerService:
         created_reminder = self.reminders.create(reminder)
         timezone_name = self._get_user_timezone(created_event.user_id)
         message = self.notification.build_creation_message(created_event, created_reminder, timezone_name)
+        sync_message = self._sync_calendar_message("create", created_event)
+        if sync_message:
+            message = f"{message} {sync_message}"
         self._notify_action_email("create", created_event, timezone_name)
         return ActionResult(created_event, created_reminder, message)
 
@@ -106,6 +119,9 @@ class SchedulerService:
         updated_event = self.events.update(event)
         timezone_name = self._get_user_timezone(updated_event.user_id)
         message = self.notification.build_update_message(updated_event, timezone_name)
+        sync_message = self._sync_calendar_message("update", updated_event)
+        if sync_message:
+            message = f"{message} {sync_message}"
         self._notify_action_email("update", updated_event, timezone_name)
         return ActionResult(updated_event, None, message)
 
@@ -115,6 +131,9 @@ class SchedulerService:
         self.events.cancel(event_id)
         timezone_name = self._get_user_timezone(existing_event.user_id)
         message = self.notification.build_cancellation_message(existing_event, timezone_name)
+        sync_message = self._sync_calendar_message("delete", existing_event)
+        if sync_message:
+            message = f"{message} {sync_message}"
         self._notify_action_email("cancel", existing_event, timezone_name)
         return ActionResult(existing_event, None, message)
 
@@ -287,3 +306,25 @@ class SchedulerService:
         subject = self.notification.build_action_email_subject(action, event)
         body = self.notification.build_action_email_body(action, event, timezone_name)
         self.email_service.send_email(email, subject, body)
+
+    def _sync_calendar_message(self, action: str, event: Event) -> str:
+        if self.calendar_sync is None:
+            return ""
+
+        try:
+            user = self.users.get_by_id(event.user_id)
+        except LookupError:
+            return ""
+
+        if action == "create":
+            outcome = self.calendar_sync.sync_create(event, user)
+        elif action == "update":
+            outcome = self.calendar_sync.sync_update(event, user)
+        elif action == "delete":
+            outcome = self.calendar_sync.sync_delete(event, user)
+        else:
+            return ""
+
+        if outcome.success:
+            return "Sincronización Google Calendar solicitada vía MCP."
+        return "Sincronización Google Calendar no disponible; mantuve el guardado local."

@@ -81,11 +81,11 @@ class AgentBehaviorTests(unittest.TestCase):
 
         self.assertIn("Listo, agend", create_message)
         self.assertIn("Reunion de proyecto", create_message)
-        self.assertIn("Tu agenda actual es:", agenda_message)
+        self.assertIn("📅 Tu agenda:", agenda_message)
         self.assertIn("Reunion de proyecto", agenda_message)
 
     def test_local_ollama_client_parses_json_decision(self) -> None:
-        client = LocalOllamaClient("http://localhost:11434", "llama3.1:8b")
+        client = LocalOllamaClient("http://localhost:11434", "qwen2.5:7b-instruct")
 
         with patch.object(
             LocalOllamaClient,
@@ -107,7 +107,7 @@ class AgentBehaviorTests(unittest.TestCase):
         self.assertIsNone(client.analyze("agenda reunion mañana a las 10"))
 
     def test_local_ollama_client_parses_json_decision(self) -> None:
-        client = LocalOllamaClient("http://localhost:11434", "llama3.1:8b")
+        client = LocalOllamaClient("http://localhost:11434", "qwen2.5:7b-instruct")
 
         with patch.object(
             LocalOllamaClient,

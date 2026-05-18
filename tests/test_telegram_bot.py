@@ -101,9 +101,9 @@ class TelegramBotTests(unittest.TestCase):
     def test_resolve_event_selection_ambiguous(self) -> None:
         now = datetime.now() + timedelta(days=2)
         events = [
-            Event(1, 10, "Reunion semanal equipo", None, None, now, now + timedelta(hours=1), 3),
-            Event(2, 10, "Reunion semanal producto", None, None, now + timedelta(days=1), now + timedelta(days=1, hours=1), 3),
-            Event(3, 10, "Doctor", None, None, now + timedelta(days=3), now + timedelta(days=3, hours=1), 3),
+            Event(id=1, user_id=10, title="Reunion semanal equipo", start_time=now, end_time=now + timedelta(hours=1), description=None, location=None, priority=3),
+            Event(id=2, user_id=10, title="Reunion semanal producto", start_time=now + timedelta(days=1), end_time=now + timedelta(days=1, hours=1), description=None, location=None, priority=3),
+            Event(id=3, user_id=10, title="Doctor", start_time=now + timedelta(days=3), end_time=now + timedelta(days=3, hours=1), description=None, location=None, priority=3),
         ]
         selection = _resolve_event_selection(ParsedCancelRequest(event_id=None, title_query="reunion semanal"), events)
         self.assertIsInstance(selection, list)
@@ -200,10 +200,10 @@ class TelegramConversationFlowTests(unittest.IsolatedAsyncioTestCase):
         user = self.dependencies.preferences.get_user("12345")
         start_time = datetime.now() + timedelta(days=2)
         self.dependencies.scheduling.create_event(
-            Event(None, user.id or 0, "Reunion semanal equipo", None, None, start_time, start_time + timedelta(hours=1), 3)
+            Event(id=None, user_id=user.id or 0, title="Reunion semanal equipo", start_time=start_time, end_time=start_time + timedelta(hours=1), description=None, location=None, priority=3)
         )
         self.dependencies.scheduling.create_event(
-            Event(None, user.id or 0, "Reunion semanal producto", None, None, start_time + timedelta(days=1), start_time + timedelta(days=1, hours=1), 3)
+            Event(id=None, user_id=user.id or 0, title="Reunion semanal producto", start_time=start_time + timedelta(days=1), end_time=start_time + timedelta(days=1, hours=1), description=None, location=None, priority=3)
         )
 
         ask_update = _FakeUpdate("cancela reunion semanal")
@@ -272,6 +272,13 @@ def _create_in_memory_connection() -> sqlite3.Connection:
             end_time TEXT NOT NULL,
             priority INTEGER NOT NULL DEFAULT 3,
             status TEXT NOT NULL DEFAULT 'scheduled',
+            source TEXT NOT NULL DEFAULT 'telegram',
+            timezone TEXT NOT NULL DEFAULT 'America/Bogota',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            confirmed INTEGER NOT NULL DEFAULT 0,
+            metadata TEXT NOT NULL DEFAULT '{}',
+            recurrence_rule TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         );
 

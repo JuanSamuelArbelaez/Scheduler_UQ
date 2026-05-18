@@ -46,6 +46,12 @@ Capas completamente implementadas:
 
 Usuario → Telegram → **UX Moderna con Botones** → Orchestrator → NLP → Intent → Agente específico → **Confirmación Inteligente** → Ejecución → **Notificación Dual** (Telegram + Email)
 
+### 🔌 Flujo MCP - Google Calendar
+
+Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → MCP transport → Google Calendar
+
+El calendario externo se asocia al email configurado durante onboarding. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
+
 ---
 
 ## 5. Funcionalidades Completas - ✅ IMPLEMENTADAS
@@ -61,6 +67,13 @@ Usuario → Telegram → **UX Moderna con Botones** → Orchestrator → NLP →
 * ✅ Recordatorios por **Email** con asuntos y cuerpos profesionales
 * ✅ Canales configurables: `telegram`, `email`, `both` (por defecto)
 * ✅ Envío automático cada 60 segundos con zona horaria del usuario
+
+### ☁️ Integración MCP / Google Calendar
+* ✅ Capa `services/providers` desacoplada para integraciones externas
+* ✅ Provider MCP para create/update/delete sincronizados
+* ✅ Descubrimiento de `tools`, `templates` y `data sources`
+* ✅ Fallback local cuando el provider falla
+* ✅ Auditoría de sincronizaciones y fallos en `History`
 
 ### ⚡ Anti-Solapamiento Inteligente
 * ✅ Detección automática de conflictos
@@ -164,6 +177,19 @@ SMTP_USERNAME=usuario
 SMTP_PASSWORD=clave
 SMTP_FROM_EMAIL=bot@tu-dominio.com
 SMTP_USE_TLS=true
+
+# MCP / Google Calendar
+MCP_ENABLED=false
+MCP_HTTP_ENDPOINT=http://localhost:8080/mcp
+MCP_TIMEOUT_SECONDS=15
+MCP_RETRY_COUNT=2
+MCP_GOOGLE_CALENDAR_CREATE_TOOL=google_calendar.create_event
+MCP_GOOGLE_CALENDAR_UPDATE_TOOL=google_calendar.update_event
+MCP_GOOGLE_CALENDAR_DELETE_TOOL=google_calendar.delete_event
+MCP_LIST_TOOLS_METHOD=tools/list
+MCP_LIST_TEMPLATES_METHOD=prompts/list
+MCP_LIST_RESOURCES_METHOD=resources/list
+GOOGLE_CALENDAR_ID=
 ```
 
 ---
@@ -236,7 +262,28 @@ Sistema de mensajes conversacionales en español:
 
 ---
 
-## 14. Testing - SUITE COMPLETA
+## 14. MCP / Google Calendar - NUEVO
+
+**Componentes implementados:**
+- ✅ `services/providers/calendar_provider.py` - interfaz base de proveedores de calendario
+- ✅ `services/providers/mcp_calendar_provider.py` - provider MCP con transporte JSON-RPC
+- ✅ `services/calendar_sync_service.py` - orquestación de sincronización, retries y fallback
+
+**Flujo de sincronización:**
+1. El usuario configura email y zona horaria en onboarding
+2. `SchedulingAgent` crea, actualiza o cancela el evento localmente
+3. `CalendarSyncService` intenta sincronizar con Google Calendar vía MCP
+4. El provider usa el email del usuario como asociación del calendario
+5. Si MCP falla, el sistema conserva la operación local y registra el fallo en `History`
+
+**Capacidades MCP expuestas:**
+- `tools` para create/update/delete
+- `templates` para plantillas de eventos
+- `data sources` para email, timezone y contexto de agenda
+
+---
+
+## 15. Testing - SUITE COMPLETA
 
 **Pruebas implementadas:**
 - ✅ **test_database_operations()** - CRUD completo
@@ -250,7 +297,7 @@ Sistema de mensajes conversacionales en español:
 
 ---
 
-## 15. Estado de Producción - ✅ LISTO
+## 16. Estado de Producción - ✅ LISTO
 
 **Sistema completamente operativo y probado:**
 

@@ -86,6 +86,20 @@ SMTP_FROM_EMAIL=tu-email@gmail.com
 SMTP_USE_TLS=true
 ```
 
+### Google Calendar vía MCP
+```bash
+MCP_ENABLED=true
+MCP_HTTP_ENDPOINT=http://localhost:8080/mcp
+MCP_TIMEOUT_SECONDS=15
+MCP_RETRY_COUNT=2
+MCP_GOOGLE_CALENDAR_CREATE_TOOL=google_calendar.create_event
+MCP_GOOGLE_CALENDAR_UPDATE_TOOL=google_calendar.update_event
+MCP_GOOGLE_CALENDAR_DELETE_TOOL=google_calendar.delete_event
+GOOGLE_CALENDAR_ID=
+```
+
+Cuando esta integración está activa, Scheduler usa el email capturado en onboarding para asociar el calendario del usuario. Si el provider MCP falla, la agenda local sigue operando y la sincronización queda registrada en el historial.
+
 ## 🎮 Uso en Telegram
 
 ### Comandos Disponibles
@@ -134,6 +148,13 @@ Reminders: id, event_id, remind_at, channel, sent_at, delivery_status
 History: id, user_id, event_id, action, timestamp, details
 ```
 
+### Flujo MCP
+```text
+Telegram → Orchestrator → SchedulingAgent → CalendarSyncService → MCPCalendarProvider → Google Calendar
+```
+
+El provider MCP expone herramientas, plantillas y data sources cuando el gateway las soporta. Si la sincronización externa falla, Scheduler mantiene el comportamiento local y registra el incidente.
+
 ## 🧪 Testing Completo
 
 Ejecuta la suite completa de pruebas:
@@ -149,6 +170,7 @@ python test_system.py
 - ✅ Integración con LLM local
 - ✅ Funciones de parsing
 - ✅ Sistema completo
+- ✅ Integración MCP / Google Calendar
 
 ## 🔧 Tecnologías
 
