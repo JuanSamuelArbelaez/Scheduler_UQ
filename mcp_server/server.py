@@ -16,7 +16,9 @@ import base64
 from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
 from google.oauth2 import service_account
+from google.oauth2.credentials import Credentials as UserCredentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 import dateutil.parser
 
 logging.basicConfig(level=logging.INFO)
@@ -85,9 +87,11 @@ class GoogleCalendarService:
         description: str | None = None,
         location: str | None = None,
         attendees: list[str] | None = None,
+        oauth_credentials: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Create a calendar event"""
-        if self.is_mock():
+        service = self._resolve_service(oauth_credentials)
+        if service is None:
             event_id = f"mock_{datetime.now().timestamp()}"
             logger.info(f"Mock: Created event {event_id} in calendar {calendar_id}")
             return {
@@ -113,7 +117,7 @@ class GoogleCalendarService:
             if attendees:
                 body["attendees"] = [{"email": email} for email in attendees]
 
-            event = self.service.events().insert(calendarId=calendar_id, body=body).execute()
+            event = service.events().insert(calendarId=calendar_id, body=body).execute()
             logger.info(f"Created Google Calendar event: {event.get('id')}")
             return event
         except Exception as e:
@@ -129,14 +133,16 @@ class GoogleCalendarService:
         end_time_utc: str | None = None,
         description: str | None = None,
         location: str | None = None,
+        oauth_credentials: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Update a calendar event"""
-        if self.is_mock():
+        service = self._resolve_service(oauth_credentials)
+        if service is None:
             logger.info(f"Mock: Updated event {event_id} in calendar {calendar_id}")
             return {"id": event_id, "summary": title, "updated": True}
 
         try:
-            event = self.service.events().get(calendarId=calendar_id, eventId=event_id).execute()
+            event = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
             
             if title:
                 event["summary"] = title
@@ -149,7 +155,7 @@ class GoogleCalendarService:
             if location:
                 event["location"] = location
 
-            updated_event = self.service.events().update(
+            updated_event = service.events().update(
                 calendarId=calendar_id, eventId=event_id, body=event
             ).execute()
             logger.info(f"Updated Google Calendar event: {event_id}")
@@ -158,31 +164,40 @@ class GoogleCalendarService:
             logger.error(f"Failed to update event: {e}")
             raise
 
-    def delete_event(self, calendar_id: str, event_id: str) -> bool:
+    def delete_event(self, calendar_id: str, event_id: str, oauth_credentials: dict[str, Any] | None = None) -> bool:
         """Delete a calendar event"""
-        if self.is_mock():
+        service = self._resolve_service(oauth_credentials)
+        if service is None:
             logger.info(f"Mock: Deleted event {event_id} from calendar {calendar_id}")
             return True
 
         try:
-            self.service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
+            service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
             logger.info(f"Deleted Google Calendar event: {event_id}")
             return True
+        except HttpError as error:
+            status = getattr(getattr(error, "resp", None), "status", None)
+            if status == 404:
+                logger.info("Google Calendar event %s was already absent; treating delete as success", event_id)
+                return True
+            logger.error(f"Failed to delete event: {error}")
+            raise
         except Exception as e:
             logger.error(f"Failed to delete event: {e}")
             raise
 
     def list_events(
-        self, calendar_id: str, max_results: int = 10
+        self, calendar_id: str, max_results: int = 10, oauth_credentials: dict[str, Any] | None = None
     ) -> list[dict[str, Any]]:
         """List calendar events"""
-        if self.is_mock():
+        service = self._resolve_service(oauth_credentials)
+        if service is None:
             logger.info(f"Mock: Listed events from calendar {calendar_id}")
             return []
 
         try:
             events_result = (
-                self.service.events()
+                service.events()
                 .list(
                     calendarId=calendar_id,
                     maxResults=max_results,
@@ -195,6 +210,22 @@ class GoogleCalendarService:
         except Exception as e:
             logger.error(f"Failed to list events: {e}")
             return []
+
+    def _resolve_service(self, oauth_credentials: dict[str, Any] | None = None):
+        if oauth_credentials:
+            try:
+                credentials = UserCredentials.from_authorized_user_info(
+                    oauth_credentials,
+                    scopes=["https://www.googleapis.com/auth/calendar"],
+                )
+                if credentials.expired and credentials.refresh_token:
+                    credentials.refresh(Request())
+                return build("calendar", "v3", credentials=credentials)
+            except Exception as error:
+                logger.warning("OAuth credentials failed for personal calendar sync: %s", error)
+                return None
+
+        return self.service
 
 
 class MCPRPCRouter:
@@ -322,6 +353,7 @@ class MCPRPCRouter:
             end_time_utc = arguments.get("end_time_utc", "")
             description = arguments.get("description")
             location = arguments.get("location")
+            oauth_credentials = arguments.get("oauth_credentials")
 
             if not self.calendar_service:
                 raise RuntimeError("Calendar service not initialized")
@@ -333,6 +365,7 @@ class MCPRPCRouter:
                 end_time_utc=end_time_utc,
                 description=description,
                 location=location,
+                oauth_credentials=oauth_credentials if isinstance(oauth_credentials, dict) else None,
             )
 
             return MCPResponse(
@@ -361,6 +394,7 @@ class MCPRPCRouter:
             end_time_utc = arguments.get("end_time_utc")
             description = arguments.get("description")
             location = arguments.get("location")
+            oauth_credentials = arguments.get("oauth_credentials")
 
             if not event_id:
                 raise ValueError("event_id is required")
@@ -376,6 +410,7 @@ class MCPRPCRouter:
                 end_time_utc=end_time_utc,
                 description=description,
                 location=location,
+                oauth_credentials=oauth_credentials if isinstance(oauth_credentials, dict) else None,
             )
 
             return MCPResponse(
@@ -399,6 +434,7 @@ class MCPRPCRouter:
         try:
             calendar_id = arguments.get("calendar_id", "primary")
             event_id = arguments.get("event_id", "")
+            oauth_credentials = arguments.get("oauth_credentials")
 
             if not event_id:
                 raise ValueError("event_id is required")
@@ -409,6 +445,7 @@ class MCPRPCRouter:
             success = self.calendar_service.delete_event(
                 calendar_id=calendar_id,
                 event_id=event_id,
+                oauth_credentials=oauth_credentials if isinstance(oauth_credentials, dict) else None,
             )
 
             return MCPResponse(

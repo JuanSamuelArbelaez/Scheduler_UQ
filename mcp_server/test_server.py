@@ -11,6 +11,8 @@ import urllib.error
 import threading
 import time
 
+from googleapiclient.errors import HttpError
+
 from mcp_server.server import (
     GoogleCalendarService,
     MCPRPCRouter,
@@ -89,6 +91,27 @@ class MCPServerTests(unittest.TestCase):
         result = service.delete_event(
             calendar_id="test@example.com",
             event_id="mock_123",
+        )
+        self.assertTrue(result)
+
+    def test_google_calendar_delete_treats_404_as_success(self) -> None:
+        """Test deleting a missing remote event is treated as success"""
+        service = GoogleCalendarService(service_account_file=None)
+        fake_response = MagicMock()
+        fake_response.status = 404
+        fake_response.reason = "Not Found"
+
+        class FakeDeleteRequest:
+            def execute(self) -> None:
+                raise HttpError(fake_response, b"not found")
+
+        fake_service = MagicMock()
+        fake_service.events.return_value.delete.return_value = FakeDeleteRequest()
+        service.service = fake_service
+
+        result = service.delete_event(
+            calendar_id="test@example.com",
+            event_id="missing_event",
         )
         self.assertTrue(result)
 

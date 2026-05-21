@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from db.repositories import UserRepository
@@ -38,6 +39,28 @@ class UserPreferencesAgent:
     def get_calendar_email(self, user: User) -> str | None:
         email = (user.email or "").strip()
         return email or None
+
+    def get_google_calendar_credentials(self, user: User) -> dict[str, Any] | None:
+        if user.id is None:
+            return None
+        return self.users.get_google_calendar_credentials(user.id)
+
+    def is_google_calendar_connected(self, user: User) -> bool:
+        if user.id is None:
+            return False
+        return self.users.has_google_calendar_credentials(user.id)
+
+    def update_google_calendar_credentials(self, user: User, credentials: dict[str, Any]) -> User:
+        if user.id is None:
+            raise ValueError("User id is required")
+        self.users.set_google_calendar_credentials(user.id, credentials)
+        return self.users.get_by_id(user.id)
+
+    def clear_google_calendar_credentials(self, user: User) -> User:
+        if user.id is None:
+            raise ValueError("User id is required")
+        self.users.clear_google_calendar_credentials(user.id)
+        return self.users.get_by_id(user.id)
 
     def has_configured_timezone(self, user: User) -> bool:
         timezone_name = str(user.preferences.get("timezone") or "").strip()

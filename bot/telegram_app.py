@@ -14,6 +14,7 @@ import json
 import logging
 import traceback
 from telegram.constants import ParseMode
+from telegram.error import BadRequest
 
 from agents.history import HistoryAgent
 from agents.intent import IntentType
@@ -22,6 +23,7 @@ from agents.orchestrator import OrchestratorAgent
 from agents.preferences import UserPreferencesAgent
 from agents.scheduling import SchedulingAgent
 from models.entities import Event, User
+from services.google_calendar_oauth import GoogleCalendarOAuthManager
 from services.local_llm import LocalLlmDecision, LocalOllamaClient
 
 
@@ -39,6 +41,7 @@ class TelegramDependencies:
     history: HistoryAgent
     llm_client: LocalOllamaClient | None = None
     default_timezone: str = "America/Bogota"
+    oauth_manager: GoogleCalendarOAuthManager | None = None
 
 
 @dataclass(slots=True)
@@ -63,6 +66,13 @@ class ParsedCancelRequest:
 
 
 logger = logging.getLogger(__name__)
+
+
+def _oauth_not_ready_text() -> str:
+    return (
+        "Google Calendar aún no está configurado en este entorno.\n"
+        "Debes definir GOOGLE_OAUTH_CLIENT_SECRETS_FILE con el JSON de credenciales de Google y reiniciar el bot."
+    )
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -114,6 +124,7 @@ def build_application(token: str, dependencies: TelegramDependencies) -> Applica
     application.add_handler(CommandHandler("create", create_command))
     application.add_handler(CommandHandler("update", update_command))
     application.add_handler(CommandHandler("cancel", cancel_command))
+    application.add_handler(CommandHandler("connect_google", connect_google_command))
     application.add_handler(CallbackQueryHandler(button_callback))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_router))
     application.add_error_handler(error_handler)
@@ -129,20 +140,53 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if user.email and dependencies.preferences.has_configured_timezone(user):
         onboarding_hint = "Tus preferencias ya están configuradas."
 
-    keyboard = [
+    keyboard: list[list[InlineKeyboardButton]] = [
         [InlineKeyboardButton("📅 Ver Agenda", callback_data="menu_agenda")],
         [InlineKeyboardButton("➕ Crear Cita", callback_data="menu_create")],
         [InlineKeyboardButton("✏️ Modificar Cita", callback_data="menu_update")],
         [InlineKeyboardButton("❌ Cancelar Cita", callback_data="menu_cancel")],
         [InlineKeyboardButton("⚙️ Preferencias", callback_data="menu_preferences")],
     ]
+
+    oauth_manager = dependencies.oauth_manager
+    google_status = ""
+    if oauth_manager is not None:
+        google_status = oauth_manager.build_status_text(user)
+        if oauth_manager.is_configured() and not oauth_manager.has_connection(user):
+            auth_url = oauth_manager.build_authorization_url(user)
+            keyboard.insert(0, [InlineKeyboardButton("🔗 Conectar Google Calendar", url=auth_url)])
+        elif not oauth_manager.is_configured():
+            keyboard.insert(0, [InlineKeyboardButton("⚠️ Configurar Google OAuth", callback_data="menu_preferences")])
+
     reply_markup = InlineKeyboardMarkup(keyboard)
 
     message = (
         "Scheduler listo. Elige una opción del menú o escribe texto libre.\n"
         f"{onboarding_hint}"
     )
+    if google_status:
+        message = f"{message}\n{google_status}"
     await update.effective_message.reply_text(message, reply_markup=reply_markup)
+
+
+async def connect_google_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    dependencies = _dependencies(context)
+    user = _ensure_user(update, dependencies)
+    oauth_manager = dependencies.oauth_manager
+
+    if oauth_manager is None or not oauth_manager.is_configured():
+        await update.effective_message.reply_text(
+            _oauth_not_ready_text()
+        )
+        return
+
+    auth_url = oauth_manager.build_authorization_url(user)
+    reply_markup = InlineKeyboardMarkup([[InlineKeyboardButton("Abrir Google Calendar", url=auth_url)]])
+    await update.effective_message.reply_text(
+        "Conecta tu Google Calendar una sola vez desde este botón.\n"
+        "Cuando termines, vuelve a Telegram y quedará sincronizado con tu calendario personal.",
+        reply_markup=reply_markup,
+    )
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -413,7 +457,11 @@ async def text_router(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
+    try:
+        await query.answer()
+    except BadRequest as error:
+        logger.info("Ignoring stale or invalid callback query: %s", error)
+        return
 
     dependencies = _dependencies(context)
     user = _ensure_user(update, dependencies)
@@ -466,9 +514,13 @@ async def button_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     elif data == "menu_preferences":
         user_prefs = dependencies.preferences.get_user(user.telegram_chat_id)
         timezone_name = dependencies.preferences.get_timezone(user_prefs)
+        google_status = "desconectado"
+        if dependencies.oauth_manager is not None and dependencies.oauth_manager.has_connection(user_prefs):
+            google_status = "conectado"
         message = (
             f"📧 Email: {user_prefs.email or 'no configurado'}\n"
             f"🕐 Zona horaria: {timezone_name}\n\n"
+            f"📆 Google Calendar: {google_status}\n\n"
             "Para cambiar, dime:\n"
             "• 'mi email es nombre@dominio.com'\n"
             "• 'mi zona horaria es America/Bogota'"
@@ -564,25 +616,57 @@ async def _handle_onboarding(
     text = (message.text or "").strip()
     pending = context.user_data.get("pending_onboarding")
 
-    if pending is None and user.email and dependencies.preferences.has_configured_timezone(user):
+    oauth_manager = dependencies.oauth_manager
+    oauth_required = oauth_manager is not None
+
+    # Compute which steps are missing for this user
+    missing_email = not bool(user.email)
+    missing_timezone = not dependencies.preferences.has_configured_timezone(user)
+    missing_oauth_config = oauth_required and not oauth_manager.is_configured()
+    missing_oauth_connection = oauth_required and oauth_manager.is_configured() and not oauth_manager.has_connection(user)
+
+    # If there is no pending onboarding and nothing is missing, allow operation
+    if pending is None and not (missing_email or missing_timezone or missing_oauth_config or missing_oauth_connection):
         return False
 
+    # Initialize pending flow when needed
     if pending is None:
-        initial_step = "email" if not user.email else "timezone"
+        # prefer order: email -> oauth (after email) -> timezone
+        if missing_email:
+            initial_step = "email"
+        elif missing_oauth_config or missing_oauth_connection:
+            initial_step = "oauth"
+        elif missing_timezone:
+            initial_step = "timezone"
+        else:
+            return False
         context.user_data["pending_onboarding"] = {"step": initial_step}
-        if initial_step == "email" and not _extract_email(text):
+
+        # Prompt the user according to the first needed step
+        if initial_step == "email":
             await message.reply_text(
                 "Antes de continuar, configura tu correo para notificaciones. Escribe algo como: mi correo es nombre@dominio.com"
             )
             return True
-        if initial_step == "timezone" and _extract_timezone(text, dependencies.default_timezone) is None:
+        if initial_step == "oauth":
+            if oauth_manager is None or not oauth_manager.is_configured():
+                await message.reply_text(_oauth_not_ready_text())
+            else:
+                auth_url = oauth_manager.build_authorization_url(user)
+                await message.reply_text(
+                    "Antes de continuar, conecta tu Google Calendar. Usa el botón para iniciar la autenticación.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Conectar Google Calendar", url=auth_url)]]),
+                )
+            return True
+        if initial_step == "timezone":
             await message.reply_text(
                 "Antes de continuar, configura tu zona horaria. Ejemplo: America/Bogota o UTC-5"
             )
             return True
-        pending = context.user_data.get("pending_onboarding")
 
-    step = str(pending.get("step") or "")
+    # If we have an active pending step, handle it
+    step = str((pending.get("step") or ""))
+
     if step == "email":
         extracted_email = _extract_email(text)
         if not extracted_email:
@@ -590,6 +674,24 @@ async def _handle_onboarding(
             return True
 
         updated_user = dependencies.preferences.update_email(user, extracted_email)
+
+        # After confirming email, if OAuth is required and not connected, ask user to connect immediately
+        if oauth_required and oauth_manager is not None:
+            if not oauth_manager.is_configured():
+                context.user_data["pending_onboarding"] = {"step": "oauth"}
+                await message.reply_text(f"Correo guardado: {updated_user.email}.\n{_oauth_not_ready_text()}")
+                return True
+
+            if not oauth_manager.has_connection(updated_user):
+                context.user_data["pending_onboarding"] = {"step": "oauth", "next": "timezone" if not dependencies.preferences.has_configured_timezone(updated_user) else None}
+                auth_url = oauth_manager.build_authorization_url(updated_user)
+                await message.reply_text(
+                    f"Correo guardado: {updated_user.email}. Ahora conecta Google Calendar para usar tu calendario personal.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Conectar Google Calendar", url=auth_url)]]),
+                )
+                return True
+
+        # If the message also included a timezone, capture it and finish onboarding
         timezone_name = _extract_timezone(text, dependencies.default_timezone)
         if timezone_name is not None:
             updated_user = dependencies.preferences.update_timezone(updated_user, timezone_name)
@@ -599,9 +701,34 @@ async def _handle_onboarding(
             )
             return True
 
+        # Otherwise request timezone next
         context.user_data["pending_onboarding"] = {"step": "timezone"}
         await message.reply_text(
             f"Correo guardado: {updated_user.email}. Ahora configura tu zona horaria (ejemplo: America/Bogota o UTC-5)."
+        )
+        return True
+
+    if step == "oauth":
+        # Always show the connect button while oauth not completed
+        if oauth_manager is None or not oauth_manager.is_configured():
+            await message.reply_text(_oauth_not_ready_text())
+            return True
+
+        if oauth_manager.has_connection(user):
+            # If connection completed (maybe via callback), move to next step
+            next_step = pending.get("next") if isinstance(pending, dict) else None
+            if next_step == "timezone" and not dependencies.preferences.has_configured_timezone(user):
+                context.user_data["pending_onboarding"] = {"step": "timezone"}
+                await message.reply_text("Conexión con Google detectada. Ahora configura tu zona horaria (ejemplo: America/Bogota).")
+                return True
+            context.user_data.pop("pending_onboarding", None)
+            await message.reply_text("Conexión con Google Calendar completada. Puedes continuar.")
+            return True
+
+        auth_url = oauth_manager.build_authorization_url(user)
+        await message.reply_text(
+            "Aún no has conectado Google Calendar. Usa este botón para autenticarse.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Conectar Google Calendar", url=auth_url)]]),
         )
         return True
 
@@ -618,8 +745,24 @@ async def _handle_onboarding(
         await message.reply_text(
             f"Configuración completada. Email: {updated_user.email or 'sin email'}. Zona horaria: {dependencies.preferences.get_timezone(updated_user)}."
         )
+        # If OAuth required and still not connected, prompt for it now
+        if oauth_required and oauth_manager is not None:
+            if not oauth_manager.is_configured():
+                context.user_data["pending_onboarding"] = {"step": "oauth"}
+                await message.reply_text(_oauth_not_ready_text())
+                return True
+
+            if not oauth_manager.has_connection(updated_user):
+                context.user_data["pending_onboarding"] = {"step": "oauth"}
+                auth_url = oauth_manager.build_authorization_url(updated_user)
+                await message.reply_text(
+                    "Ahora conecta Google Calendar para usar tu calendario personal.",
+                    reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔗 Conectar Google Calendar", url=auth_url)]]),
+                )
+                return True
         return True
 
+    # Fallback: clear any stale pending state
     context.user_data.pop("pending_onboarding", None)
     return False
 
