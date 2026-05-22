@@ -7,12 +7,9 @@ import os
 
 @dataclass(frozen=True)
 class AppSettings:
-    telegram_bot_token: str | None
-    telegram_bot_url: str | None
     sqlite_path: Path
     default_reminder_minutes: int = 15
     default_timezone: str = "America/Bogota"
-    run_telegram_bot: bool = False
     llm_provider: str = "none"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = ""
@@ -54,7 +51,6 @@ def load_settings() -> AppSettings:
     sqlite_path = Path(os.getenv("SQLITE_PATH", "scheduler.db"))
     default_reminder_minutes = int(os.getenv("DEFAULT_REMINDER_MINUTES", "15"))
     default_timezone = os.getenv("DEFAULT_TIMEZONE", "America/Bogota").strip() or "America/Bogota"
-    run_telegram_bot = _parse_bool(os.getenv("RUN_TELEGRAM_BOT", "false"))
     llm_provider = os.getenv("LLM_PROVIDER", "none").strip().lower()
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
     ollama_model = os.getenv("OLLAMA_MODEL", "").strip()
@@ -93,12 +89,9 @@ def load_settings() -> AppSettings:
     tts_model_name = os.getenv("TTS_MODEL_NAME", "tts_models/es/css10/vits").strip() or "tts_models/es/css10/vits"
 
     return AppSettings(
-        telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
-        telegram_bot_url=os.getenv("TELEGRAM_BOT_URL"),
         sqlite_path=sqlite_path,
         default_reminder_minutes=default_reminder_minutes,
         default_timezone=default_timezone,
-        run_telegram_bot=run_telegram_bot,
         llm_provider=llm_provider,
         ollama_base_url=ollama_base_url,
         ollama_model=ollama_model,

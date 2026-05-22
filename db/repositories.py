@@ -70,34 +70,34 @@ class UserRepository:
         preferences = self._sanitize_preferences(user.preferences)
         self.connection.execute(
             """
-            INSERT INTO users (telegram_chat_id, email, preferences)
+            INSERT INTO users (user_key, email, preferences)
             VALUES (?, ?, ?)
-            ON CONFLICT(telegram_chat_id) DO UPDATE SET
+            ON CONFLICT(user_key) DO UPDATE SET
                 email = excluded.email,
                 preferences = excluded.preferences
             """,
-            (user.telegram_chat_id, user.email, json.dumps(preferences)),
+            (user.user_key, user.email, json.dumps(preferences)),
         )
         self.connection.commit()
-        return self.get_by_chat_id(user.telegram_chat_id)
+        return self.get_by_user_key(user.user_key)
 
     def create_web_user(self, username: str, email: str, password_hash: str, default_timezone: str) -> User:
-        telegram_chat_id = f"web:{uuid.uuid4().hex}"
+        user_key = f"web:{uuid.uuid4().hex}"
         preferences = {"timezone": default_timezone}
         cursor = self.connection.execute(
             """
-            INSERT INTO users (telegram_chat_id, username, email, password_hash, email_verified, preferences)
+            INSERT INTO users (user_key, username, email, password_hash, email_verified, preferences)
             VALUES (?, ?, ?, ?, 0, ?)
             """,
-            (telegram_chat_id, username.strip(), email.strip(), password_hash, json.dumps(preferences)),
+            (user_key, username.strip(), email.strip(), password_hash, json.dumps(preferences)),
         )
         self.connection.commit()
         return self.get_by_id(cursor.lastrowid)
 
-    def get_by_chat_id(self, telegram_chat_id: str) -> User:
+    def get_by_user_key(self, user_key: str) -> User:
         row = self.connection.execute(
-            "SELECT * FROM users WHERE telegram_chat_id = ?",
-            (telegram_chat_id,),
+            "SELECT * FROM users WHERE user_key = ?",
+            (user_key,),
         ).fetchone()
         if row is None:
             raise LookupError("User not found")
@@ -204,7 +204,7 @@ class UserRepository:
         preferences["email_verified"] = bool(row["email_verified"])
         return User(
             id=row["id"],
-            telegram_chat_id=row["telegram_chat_id"],
+            user_key=row["user_key"],
             email=row["email"],
             preferences=preferences,
         )
@@ -341,7 +341,7 @@ class EventRepository:
             end_time=_parse_datetime(row["end_time"]),
             priority=row["priority"],
             status=row["status"],
-            source=get_column("source", "telegram"),
+            source=get_column("source", "web"),
             timezone=get_column("timezone", "America/Bogota"),
             created_at=_parse_datetime(get_column("created_at", row["start_time"])),
             updated_at=_parse_datetime(get_column("updated_at", row["start_time"])),
@@ -375,7 +375,7 @@ class ReminderRepository:
                 events.title AS event_title,
                 events.start_time AS event_start_time,
                 users.email AS user_email,
-                users.telegram_chat_id AS user_telegram_chat_id,
+                users.user_key AS user_user_key,
                 users.preferences AS user_preferences
             FROM reminders
             JOIN events ON events.id = reminders.event_id

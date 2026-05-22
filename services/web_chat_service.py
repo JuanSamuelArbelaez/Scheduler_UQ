@@ -8,17 +8,17 @@ from agents.notification import NotificationAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.preferences import UserPreferencesAgent
 from agents.scheduling import SchedulingAgent
-from bot.telegram_app import (
+from models.entities import Event, User
+from services.calendar_text_parsing import (
+    ParsedCancelRequest,
     _extract_timezone,
     _now_in_timezone,
-    ParsedCancelRequest,
     _parse_natural_cancel_request,
     _parse_natural_create,
     _parse_natural_update,
     _resolve_event_selection,
     _to_utc_datetime,
 )
-from models.entities import Event, User
 from services.google_calendar_oauth import GoogleCalendarOAuthManager
 
 

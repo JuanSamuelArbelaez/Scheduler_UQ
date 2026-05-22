@@ -25,7 +25,6 @@ from services.local_llm import LocalOllamaClient
 from services.providers.mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider
 from services.speech_to_text_service import SpeechToTextService
 from services.text_to_speech_service import TextToSpeechService
-from services.telegram_service import TelegramService
 from services.web_auth_service import WebAuthService
 from web.app import WebDependencies, create_web_app
 
@@ -79,9 +78,6 @@ def build_application() -> dict[str, object]:
 			use_tls=settings.smtp_use_tls,
 		)
 	)
-	telegram_service = None
-	if settings.telegram_bot_token:
-		telegram_service = TelegramService(settings.telegram_bot_token)
 	history_agent = HistoryAgent(history_repository)
 	if calendar_sync_service is not None:
 		calendar_sync_service.history = history_agent
@@ -91,7 +87,6 @@ def build_application() -> dict[str, object]:
 		reminder_repository,
 		user_repository,
 		email_service,
-		telegram_service,
 		history=history_agent,
 		calendar_sync=calendar_sync_service,
 		default_timezone=settings.default_timezone,
@@ -113,7 +108,6 @@ def build_application() -> dict[str, object]:
 		redirect_host=settings.google_oauth_redirect_host,
 		redirect_port=settings.web_port if settings.run_web_app else settings.google_oauth_redirect_port,
 		scopes=settings.google_oauth_scopes,
-		telegram_bot_token=settings.telegram_bot_token,
 	)
 	if not oauth_manager.is_configured():
 		print("Google OAuth no está configurado: falta GOOGLE_OAUTH_CLIENT_SECRETS_FILE o el archivo no existe.")
@@ -158,7 +152,6 @@ def build_application() -> dict[str, object]:
 			"history": history_agent,
 			"llm_client": llm_client,
 			"email_service": email_service,
-			"telegram_service": telegram_service,
 			"oauth_manager": oauth_manager,
 			"web_auth": web_auth_service,
 			"stt": stt_service,

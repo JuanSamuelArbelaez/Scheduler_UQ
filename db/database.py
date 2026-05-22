@@ -25,7 +25,7 @@ class Database:
                 """
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    telegram_chat_id TEXT NOT NULL UNIQUE,
+                    user_key TEXT NOT NULL UNIQUE,
                     email TEXT,
                     preferences TEXT NOT NULL DEFAULT '{}',
                     username TEXT,
@@ -53,7 +53,7 @@ class Database:
                     end_time TEXT NOT NULL,
                     priority INTEGER NOT NULL DEFAULT 3,
                     status TEXT NOT NULL DEFAULT 'scheduled',
-                    source TEXT NOT NULL DEFAULT 'telegram',
+                    source TEXT NOT NULL DEFAULT 'web',
                     timezone TEXT NOT NULL DEFAULT 'America/Bogota',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
