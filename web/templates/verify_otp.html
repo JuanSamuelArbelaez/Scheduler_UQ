@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card auth-card">
+  <h1>Verifica Tu Correo</h1>
+  <p class="muted">Te enviamos un código OTP de 6 dígitos.</p>
+  <form method="post" class="stack">
+    <label>OTP</label>
+    <input name="otp" pattern="[0-9]{6}" maxlength="6" required />
+    <button type="submit">Validar OTP</button>
+  </form>
+  <form method="post" action="{{ url_for('resend_otp') }}">
+    <button class="secondary" type="submit">Reenviar OTP</button>
+  </form>
+</section>
+{% endblock %}

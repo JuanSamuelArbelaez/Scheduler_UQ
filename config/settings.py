@@ -35,8 +35,17 @@ class AppSettings:
     google_calendar_calendar_id: str = ""
     google_oauth_client_secrets_file: str = ""
     google_oauth_redirect_host: str = "127.0.0.1"
-    google_oauth_redirect_port: int = 8765
+    google_oauth_redirect_port: int = 5000
     google_oauth_scopes: str = "https://www.googleapis.com/auth/calendar"
+    run_web_app: bool = True
+    web_host: str = "127.0.0.1"
+    web_port: int = 5000
+    flask_secret_key: str = ""
+    app_encryption_key: str = ""
+    otp_expiration_minutes: int = 10
+    whisper_model: str = "base"
+    tts_provider: str = "coqui"
+    tts_model_name: str = "tts_models/es/css10/vits"
 
 
 def load_settings() -> AppSettings:
@@ -68,11 +77,20 @@ def load_settings() -> AppSettings:
     google_calendar_calendar_id = os.getenv("GOOGLE_CALENDAR_ID", "").strip()
     google_oauth_client_secrets_file = os.getenv("GOOGLE_OAUTH_CLIENT_SECRETS_FILE", "").strip()
     google_oauth_redirect_host = os.getenv("GOOGLE_OAUTH_REDIRECT_HOST", "127.0.0.1").strip() or "127.0.0.1"
-    google_oauth_redirect_port = int(os.getenv("GOOGLE_OAUTH_REDIRECT_PORT", "8765"))
+    google_oauth_redirect_port = int(os.getenv("GOOGLE_OAUTH_REDIRECT_PORT", "5000"))
     google_oauth_scopes = os.getenv(
         "GOOGLE_OAUTH_SCOPES",
         "https://www.googleapis.com/auth/calendar",
     ).strip() or "https://www.googleapis.com/auth/calendar"
+    run_web_app = _parse_bool(os.getenv("RUN_WEB_APP", "true"))
+    web_host = os.getenv("WEB_HOST", "127.0.0.1").strip() or "127.0.0.1"
+    web_port = int(os.getenv("WEB_PORT", "5000"))
+    flask_secret_key = os.getenv("FLASK_SECRET_KEY", "").strip()
+    app_encryption_key = os.getenv("APP_ENCRYPTION_KEY", "").strip()
+    otp_expiration_minutes = int(os.getenv("OTP_EXPIRATION_MINUTES", "10"))
+    whisper_model = os.getenv("WHISPER_MODEL", "base").strip() or "base"
+    tts_provider = os.getenv("TTS_PROVIDER", "coqui").strip().lower() or "coqui"
+    tts_model_name = os.getenv("TTS_MODEL_NAME", "tts_models/es/css10/vits").strip() or "tts_models/es/css10/vits"
 
     return AppSettings(
         telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN"),
@@ -105,6 +123,15 @@ def load_settings() -> AppSettings:
         google_oauth_redirect_host=google_oauth_redirect_host,
         google_oauth_redirect_port=google_oauth_redirect_port,
         google_oauth_scopes=google_oauth_scopes,
+        run_web_app=run_web_app,
+        web_host=web_host,
+        web_port=web_port,
+        flask_secret_key=flask_secret_key,
+        app_encryption_key=app_encryption_key,
+        otp_expiration_minutes=otp_expiration_minutes,
+        whisper_model=whisper_model,
+        tts_provider=tts_provider,
+        tts_model_name=tts_model_name,
     )
 
 

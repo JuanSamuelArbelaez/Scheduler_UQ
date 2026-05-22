@@ -3,8 +3,12 @@ from __future__ import annotations
 from dataclasses import replace
 from datetime import datetime
 import json
+import os
 import sqlite3
+import uuid
 from typing import Any
+
+from cryptography.fernet import Fernet, InvalidToken
 
 from models.entities import Event, HistoryEntry, Reminder, User
 
@@ -18,6 +22,38 @@ def _parse_json(value: str) -> dict[str, Any]:
         return json.loads(value) if value else {}
     except json.JSONDecodeError:
         return {}
+
+
+def _build_cipher() -> Fernet | None:
+    key = os.getenv("APP_ENCRYPTION_KEY", "").strip()
+    if not key:
+        return None
+    try:
+        return Fernet(key.encode("utf-8"))
+    except Exception:
+        return None
+
+
+def _encrypt_text(value: str) -> str:
+    cipher = _build_cipher()
+    if cipher is None:
+        return value
+    encrypted = cipher.encrypt(value.encode("utf-8")).decode("utf-8")
+    return json.dumps({"enc": encrypted})
+
+
+def _decrypt_text(value: str) -> str:
+    payload = _parse_json(value)
+    token = payload.get("enc")
+    if not token:
+        return value
+    cipher = _build_cipher()
+    if cipher is None:
+        return ""
+    try:
+        return cipher.decrypt(str(token).encode("utf-8")).decode("utf-8")
+    except (InvalidToken, ValueError):
+        return ""
 
 
 class UserRepository:
@@ -45,6 +81,19 @@ class UserRepository:
         self.connection.commit()
         return self.get_by_chat_id(user.telegram_chat_id)
 
+    def create_web_user(self, username: str, email: str, password_hash: str, default_timezone: str) -> User:
+        telegram_chat_id = f"web:{uuid.uuid4().hex}"
+        preferences = {"timezone": default_timezone}
+        cursor = self.connection.execute(
+            """
+            INSERT INTO users (telegram_chat_id, username, email, password_hash, email_verified, preferences)
+            VALUES (?, ?, ?, ?, 0, ?)
+            """,
+            (telegram_chat_id, username.strip(), email.strip(), password_hash, json.dumps(preferences)),
+        )
+        self.connection.commit()
+        return self.get_by_id(cursor.lastrowid)
+
     def get_by_chat_id(self, telegram_chat_id: str) -> User:
         row = self.connection.execute(
             "SELECT * FROM users WHERE telegram_chat_id = ?",
@@ -52,33 +101,48 @@ class UserRepository:
         ).fetchone()
         if row is None:
             raise LookupError("User not found")
-        preferences = json.loads(row["preferences"] or "{}")
-        credentials = self.get_google_calendar_credentials(row["id"])
-        if credentials is not None:
-            preferences["google_calendar_oauth"] = credentials
-            preferences["google_calendar_connected"] = True
-        return User(
-            id=row["id"],
-            telegram_chat_id=row["telegram_chat_id"],
-            email=row["email"],
-            preferences=preferences,
-        )
+        return self._row_to_user(row)
 
     def get_by_id(self, user_id: int) -> User:
         row = self.connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if row is None:
             raise LookupError("User not found")
-        preferences = json.loads(row["preferences"] or "{}")
-        credentials = self.get_google_calendar_credentials(row["id"])
-        if credentials is not None:
-            preferences["google_calendar_oauth"] = credentials
-            preferences["google_calendar_connected"] = True
-        return User(
-            id=row["id"],
-            telegram_chat_id=row["telegram_chat_id"],
-            email=row["email"],
-            preferences=preferences,
+        return self._row_to_user(row)
+
+    def get_by_username(self, username: str) -> User:
+        row = self.connection.execute("SELECT * FROM users WHERE username = ?", (username.strip(),)).fetchone()
+        if row is None:
+            raise LookupError("User not found")
+        return self._row_to_user(row)
+
+    def get_by_email(self, email: str) -> User:
+        row = self.connection.execute("SELECT * FROM users WHERE email = ?", (email.strip(),)).fetchone()
+        if row is None:
+            raise LookupError("User not found")
+        return self._row_to_user(row)
+
+    def verify_email(self, user_id: int) -> User:
+        self.connection.execute(
+            "UPDATE users SET email_verified = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (user_id,),
         )
+        self.connection.commit()
+        return self.get_by_id(user_id)
+
+    def is_email_verified(self, user_id: int) -> bool:
+        row = self.connection.execute("SELECT email_verified FROM users WHERE id = ?", (user_id,)).fetchone()
+        if row is None:
+            return False
+        return bool(row["email_verified"])
+
+    def get_password_hash_by_username(self, username: str) -> str | None:
+        row = self.connection.execute(
+            "SELECT password_hash FROM users WHERE username = ?",
+            (username.strip(),),
+        ).fetchone()
+        if row is None:
+            return None
+        return row["password_hash"]
 
     def update_email_and_preferences(self, user_id: int, email: str | None, preferences: dict[str, Any]) -> User:
         sanitized_preferences = self._sanitize_preferences(preferences)
@@ -90,6 +154,8 @@ class UserRepository:
         return self.get_by_id(user_id)
 
     def set_google_calendar_credentials(self, user_id: int, credentials: dict[str, Any]) -> None:
+        serialized = json.dumps(credentials)
+        protected = _encrypt_text(serialized)
         self.connection.execute(
             """
             INSERT INTO google_calendar_credentials (user_id, credentials_json, connected_at, updated_at)
@@ -98,7 +164,7 @@ class UserRepository:
                 credentials_json = excluded.credentials_json,
                 updated_at = CURRENT_TIMESTAMP
             """,
-            (user_id, json.dumps(credentials)),
+            (user_id, protected),
         )
         self.connection.commit()
 
@@ -110,7 +176,9 @@ class UserRepository:
         if row is None:
             return None
         try:
-            credentials = json.loads(row["credentials_json"] or "{}")
+            raw_value = row["credentials_json"] or "{}"
+            decrypted = _decrypt_text(raw_value)
+            credentials = json.loads(decrypted or raw_value)
         except json.JSONDecodeError:
             return None
         return credentials if isinstance(credentials, dict) and credentials else None
@@ -125,6 +193,21 @@ class UserRepository:
             (user_id,),
         ).fetchone()
         return row is not None
+
+    def _row_to_user(self, row: sqlite3.Row) -> User:
+        preferences = json.loads(row["preferences"] or "{}")
+        credentials = self.get_google_calendar_credentials(row["id"])
+        if credentials is not None:
+            preferences["google_calendar_oauth"] = credentials
+            preferences["google_calendar_connected"] = True
+        preferences["username"] = row["username"]
+        preferences["email_verified"] = bool(row["email_verified"])
+        return User(
+            id=row["id"],
+            telegram_chat_id=row["telegram_chat_id"],
+            email=row["email"],
+            preferences=preferences,
+        )
 
 
 class EventRepository:
@@ -349,3 +432,76 @@ class HistoryRepository:
         )
         self.connection.commit()
         return replace(entry, id=cursor.lastrowid)
+
+
+class OTPRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def create_code(self, user_id: int, otp_hash: str, expires_at: datetime) -> None:
+        self.connection.execute(
+            """
+            INSERT INTO email_otp_codes (user_id, otp_hash, expires_at)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, otp_hash, expires_at.isoformat()),
+        )
+        self.connection.commit()
+
+    def get_latest_active(self, user_id: int) -> sqlite3.Row | None:
+        return self.connection.execute(
+            """
+            SELECT *
+            FROM email_otp_codes
+            WHERE user_id = ?
+              AND used_at IS NULL
+            ORDER BY created_at DESC
+            LIMIT 1
+            """,
+            (user_id,),
+        ).fetchone()
+
+    def mark_used(self, code_id: int) -> None:
+        self.connection.execute(
+            "UPDATE email_otp_codes SET used_at = CURRENT_TIMESTAMP WHERE id = ?",
+            (code_id,),
+        )
+        self.connection.commit()
+
+
+class ChatRepository:
+    def __init__(self, connection: sqlite3.Connection) -> None:
+        self.connection = connection
+
+    def append_message(self, user_id: int, role: str, content: str) -> None:
+        encrypted_content = _encrypt_text(content)
+        self.connection.execute(
+            """
+            INSERT INTO chat_messages (user_id, role, encrypted_content)
+            VALUES (?, ?, ?)
+            """,
+            (user_id, role, encrypted_content),
+        )
+        self.connection.commit()
+
+    def list_messages(self, user_id: int, limit: int = 50) -> list[dict[str, str]]:
+        rows = self.connection.execute(
+            """
+            SELECT role, encrypted_content, created_at
+            FROM chat_messages
+            WHERE user_id = ?
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (user_id, limit),
+        ).fetchall()
+        payload: list[dict[str, str]] = []
+        for row in reversed(rows):
+            payload.append(
+                {
+                    "role": row["role"],
+                    "content": _decrypt_text(row["encrypted_content"]),
+                    "created_at": row["created_at"],
+                }
+            )
+        return payload

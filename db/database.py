@@ -27,7 +27,12 @@ class Database:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     telegram_chat_id TEXT NOT NULL UNIQUE,
                     email TEXT,
-                    preferences TEXT NOT NULL DEFAULT '{}'
+                    preferences TEXT NOT NULL DEFAULT '{}',
+                    username TEXT,
+                    password_hash TEXT,
+                    email_verified INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
 
                 CREATE TABLE IF NOT EXISTS google_calendar_credentials (
@@ -78,10 +83,38 @@ class Database:
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
                     FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE SET NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS email_otp_codes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    otp_hash TEXT NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    used_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    encrypted_content TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
                 """
             )
             self._ensure_column(connection, "reminders", "sent_at", "TEXT")
             self._ensure_column(connection, "reminders", "delivery_status", "TEXT")
+            self._ensure_column(connection, "users", "username", "TEXT")
+            self._ensure_column(connection, "users", "password_hash", "TEXT")
+            self._ensure_column(connection, "users", "email_verified", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(connection, "users", "created_at", "TEXT")
+            self._ensure_column(connection, "users", "updated_at", "TEXT")
+
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username_unique ON users(username)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_otp_user_id ON email_otp_codes(user_id)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_chat_messages_user_id ON chat_messages(user_id)")
             connection.commit()
 
     @contextmanager
@@ -127,7 +160,7 @@ class Database:
                 if pragma_name in {"table_info"}:
                     return sqlite3.SQLITE_OK
             if hasattr(sqlite3, "SQLITE_ALTER_TABLE") and action == sqlite3.SQLITE_ALTER_TABLE:
-                if (_arg1 or "").lower() == "reminders":
+                if (_arg1 or "").lower() in {"reminders", "users"}:
                     return sqlite3.SQLITE_OK
             if action in blocked_actions:
                 return sqlite3.SQLITE_DENY

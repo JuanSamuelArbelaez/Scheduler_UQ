@@ -1,8 +1,15 @@
-# Scheduler UQ - Sistema Multiagente de Agenda por Telegram
+# Scheduler UQ - Web App Local (Flask + MCP)
 
-**Estado: ✅ COMPLETAMENTE FUNCIONAL Y OPERATIVO**
+**Estado: ✅ Rama de migración activa a interfaz web local**
 
-Scheduler es un sistema multiagente avanzado para gestionar agendas personales mediante Telegram con lenguaje natural, recordatorios duales (email + Telegram), y UX moderna con botones interactivos.
+Scheduler es un sistema multiagente para gestionar agendas personales con lenguaje natural, ahora orientado a interfaz web local en Flask. En esta rama se trabaja solo en la versión MCP.
+
+## Nota de Rama
+
+- Esta rama reemplaza el canal Telegram por una interfaz HTML local.
+- Incluye login, registro, OTP por correo y onboarding obligatorio con OAuth Google Calendar.
+- Mantiene sincronización de calendario via MCP.
+- Soporta chat por texto y audio (Whisper STT), y escucha de respuestas con TTS local.
 
 ## ✨ Características Principales
 
@@ -127,33 +134,19 @@ La conexión se guarda por usuario en SQLite y se usa para sincronizar sus event
 
 Ver [mcp_server/README.md](mcp_server/README.md) para más detalles.
 
-## 🎮 Uso en Telegram
+## 💻 Uso Web Local
 
-### Comandos Disponibles
-- `/start` - Menú principal con botones interactivos
-- `/agenda` - Ver agenda completa organizada por días
-- `/create` - Crear nuevo evento
-- `/update` - Modificar evento existente
-- `/cancel` - Cancelar evento
-- `/health` - Estado del sistema
+### Flujo de acceso
+1. Regístrate con usuario, correo y contraseña.
+2. Verifica correo con OTP enviado por email.
+3. Inicia sesión.
+4. Completa onboarding: zona horaria + conexión Google Calendar.
 
-### Texto Libre Inteligente
-El bot entiende lenguaje natural en español:
-
-```
-"Agenda una reunión con Ana mañana a las 3:30pm"
-"¿Qué tengo programado hoy?"
-"Cancela mi cita de las 5"
-"Mueve la reunión a mañana 10am"
-"Mi zona horaria es UTC-5"
-"Configura mi email: usuario@dominio.com"
-```
-
-### UX Moderna con Botones
-1. Envía `/start` al bot
-2. Elige opciones del menú interactivo
-3. Confirma acciones críticas
-4. Recibe notificaciones naturales
+### Chat con el agente
+- Campo de texto para mensajes libres.
+- Botón de grabación para enviar audio (Whisper STT).
+- El agente responde en texto.
+- Cada respuesta del asistente incluye botón para escucharla con TTS local.
 
 ## 🏗️ Arquitectura
 

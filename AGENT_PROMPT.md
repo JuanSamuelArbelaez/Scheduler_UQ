@@ -17,7 +17,7 @@ Tu responsabilidad es **diseñar, implementar y modificar código** para el proy
 
 El sistema **Scheduler** es un MSA que:
 
-* Recibe mensajes desde Telegram
+* Recibe mensajes desde una interfaz web local (Flask)
 * Interpreta lenguaje natural
 * Ejecuta operaciones CRUD sobre una agenda
 * Usa múltiples agentes especializados
@@ -39,7 +39,7 @@ El sistema sigue arquitectura **FC-MSA** con capas:
 
 * Python 3.13
 * SQLite
-* python-telegram-bot
+* Flask
 * Arquitectura modular basada en agentes
 * Variables sensibles en **secrets / env**
 
@@ -69,12 +69,12 @@ Cada agente debe ser independiente:
 * Nunca hardcodear tokens
 * Usar variables de entorno:
 
-  * `TELEGRAM_BOT_TOKEN`
-  * `TELEGRAM_BOT_URL`
+  * `FLASK_SECRET_KEY`
+  * `APP_ENCRYPTION_KEY`
 
 * Cargar `.env` en desarrollo si existe, pero no versionarlo.
-* Usar `RUN_TELEGRAM_BOT` para controlar si el bot entra en polling.
-* Si `LLM_PROVIDER=ollama`, verificar que Ollama y el modelo configurado estén disponibles antes de iniciar polling.
+* Usar `RUN_WEB_APP` para controlar si la app web inicia.
+* Si `LLM_PROVIDER=ollama`, verificar que Ollama y el modelo configurado estén disponibles antes de iniciar la app.
 
 ---
 
@@ -141,7 +141,7 @@ Reglas de implementación:
 * Exponer `tools`, `templates` y `data sources` si el MCP server lo soporta
 * Sincronizar `create`, `update` y `delete` contra Google Calendar cuando `MCP_ENABLED=true`
 * Usar OAuth de Google Calendar por usuario y sincronizar contra su calendario personal `primary`
-* Mantener el onboarding con un paso único de conexión a Google Calendar desde Telegram
+* Mantener el onboarding con un paso de conexión a Google Calendar desde la UI web
 * Mantener `UTC` internamente y convertir con la zona horaria del usuario en límites de entrada y salida
 * Nunca bloquear operaciones locales por un fallo externo
 
@@ -181,7 +181,7 @@ Nota de operación:
 * No permitir solapamiento de eventos
 * No modificar eventos pasados
 * Recordatorios por defecto: 15 minutos antes
-* Soportar múltiples usuarios (chat_id)
+* Soportar múltiples usuarios autenticados (sesión web)
 
 ---
 
@@ -195,12 +195,12 @@ Nota de operación:
 
 ## ✅ Pruebas
 
-Se debe mantener módulo de pruebas para agentes y bot Telegram.
+Se debe mantener módulo de pruebas para agentes y capa web.
 
 Archivos esperados:
 
 * `tests/test_agents.py`
-* `tests/test_telegram_bot.py`
+* `tests/test_web_auth.py`
 * `run_tests.py`
 
 Ejecución recomendada:
@@ -220,7 +220,7 @@ project/
 ├── db/
 ├── services/
 ├── config/
-├── bot/
+├── web/
 ├── .env.example
 ├── .gitignore
 └── main.py

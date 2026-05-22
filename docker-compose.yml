@@ -1,0 +1,59 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scheduler-web
+    restart: unless-stopped
+    environment:
+      RUN_WEB_APP: "true"
+      WEB_HOST: "0.0.0.0"
+      WEB_PORT: "5000"
+      FLASK_SECRET_KEY: "change-me-in-production"
+      APP_ENCRYPTION_KEY: "replace-with-fernet-key"
+      SQLITE_PATH: "/data/scheduler.db"
+      MCP_ENABLED: "true"
+      MCP_HTTP_ENDPOINT: "http://mcp:8088/mcp"
+      MCP_TIMEOUT_SECONDS: "15"
+      MCP_RETRY_COUNT: "2"
+      GOOGLE_OAUTH_REDIRECT_HOST: "127.0.0.1"
+      GOOGLE_OAUTH_REDIRECT_PORT: "5000"
+      GOOGLE_OAUTH_CLIENT_SECRETS_FILE: "/app/oauth_client_secret.json"
+      GOOGLE_SERVICE_ACCOUNT_FILE: "/app/credentials.json"
+      WHISPER_MODEL: "base"
+      TTS_PROVIDER: "coqui"
+      TTS_MODEL_NAME: "tts_models/es/css10/vits"
+    ports:
+      - "5000:5000"
+    volumes:
+      - scheduler_data:/data
+      - ./credentials.json:/app/credentials.json:ro
+      - ./oauth_client_secret.json:/app/oauth_client_secret.json:ro
+    depends_on:
+      mcp:
+        condition: service_healthy
+
+  mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: scheduler-mcp
+    restart: unless-stopped
+    command: ["python", "-m", "mcp_server.run"]
+    environment:
+      MCP_HOST: "0.0.0.0"
+      MCP_PORT: "8088"
+      GOOGLE_SERVICE_ACCOUNT_FILE: "/app/credentials.json"
+    expose:
+      - "8088"
+    volumes:
+      - ./credentials.json:/app/credentials.json:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import json,urllib.request; req=urllib.request.Request('http://127.0.0.1:8088/mcp', data=json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/list'}).encode('utf-8'), headers={'Content-Type':'application/json'}, method='POST'); urllib.request.urlopen(req, timeout=5).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  scheduler_data:

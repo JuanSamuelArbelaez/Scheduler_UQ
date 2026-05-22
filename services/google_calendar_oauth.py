@@ -63,7 +63,7 @@ class GoogleCalendarOAuthManager:
     def has_connection(self, user: User) -> bool:
         return self.preferences.is_google_calendar_connected(user)
 
-    def build_authorization_url(self, user: User) -> str:
+    def build_authorization_url(self, user: User, force_account_selection: bool = False) -> str:
         if not self.is_configured():
             raise RuntimeError("Google OAuth no está configurado")
 
@@ -71,7 +71,7 @@ class GoogleCalendarOAuthManager:
         flow = self._build_flow(state)
         authorization_url, _ = flow.authorization_url(
             access_type="offline",
-            prompt="consent",
+            prompt="consent select_account" if force_account_selection else "consent",
             include_granted_scopes="true",
             state=state,
         )
@@ -148,6 +148,9 @@ class GoogleCalendarOAuthManager:
         if not self.is_configured():
             return "⚠️ Aún no configuré el flujo de Google Calendar."
         return "🔗 Conecta Google Calendar una sola vez para usar tu calendario personal."
+
+    def disconnect(self, user: User) -> None:
+        self.preferences.clear_google_calendar_credentials(user)
 
     def _build_flow(self, state: str) -> Flow:
         flow = Flow.from_client_secrets_file(str(self.client_secrets_file), scopes=self.scopes, state=state)

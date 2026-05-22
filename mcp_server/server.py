@@ -218,8 +218,12 @@ class GoogleCalendarService:
                     oauth_credentials,
                     scopes=["https://www.googleapis.com/auth/calendar"],
                 )
-                if credentials.expired and credentials.refresh_token:
-                    credentials.refresh(Request())
+                if credentials.expired:
+                    if credentials.refresh_token:
+                        credentials.refresh(Request())
+                    else:
+                        logger.warning("OAuth token expired and no refresh_token available; falling back")
+                        return None
                 return build("calendar", "v3", credentials=credentials)
             except Exception as error:
                 logger.warning("OAuth credentials failed for personal calendar sync: %s", error)

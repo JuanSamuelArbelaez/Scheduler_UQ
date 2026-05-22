@@ -1,18 +1,14 @@
-# PROJECT_CONTEXT.md — Scheduler (Sistema Multiagente de Agenda por Telegram)
+# PROJECT_CONTEXT.md — Scheduler (Sistema Multiagente de Agenda Web Local)
 
 ## 1. Descripción General
 
-**Scheduler** es un Sistema Multiagente (MSA) completamente funcional para gestionar agendas personales mediante Telegram usando lenguaje natural avanzado.
+**Scheduler** es un Sistema Multiagente (MSA) para gestionar agendas personales mediante una interfaz web local (Flask) usando lenguaje natural avanzado.
 
 **Estado Actual: ✅ SISTEMA COMPLETO Y OPERATIVO**
 
-Objetivo: permitir operaciones CRUD completas, recordatorios duales (email + Telegram), gestión inteligente por agentes autónomos, y UX moderna con botones interactivos.
+Objetivo: permitir operaciones CRUD completas, autenticación web con OTP, onboarding con OAuth Google Calendar, chat texto/audio y gestión inteligente por agentes autónomos.
 
-El sistema se integra con un bot de Telegram completamente funcional:
-
-* Bot: `t.me/uq_scheduler_bot`
-* Token: almacenado de forma segura en **secrets** (no hardcodeado)
-* UX Moderna: Botones inline, menús interactivos, navegación intuitiva
+En esta rama se trabaja **solo la versión MCP** y la interfaz Telegram queda fuera del flujo principal.
 
 ---
 
@@ -44,13 +40,13 @@ Capas completamente implementadas:
 
 ## 4. Flujo Completo - OPERATIVO
 
-Usuario → Telegram → **UX Moderna con Botones** → Orchestrator → NLP → Intent → Agente específico → **Confirmación Inteligente** → Ejecución → **Notificación Dual** (Telegram + Email)
+Usuario → Flask Web UI → Auth+OTP → Onboarding (timezone + OAuth Google) → Orchestrator → NLP → Intent → Agente específico → Ejecución → Respuesta textual + TTS opcional
 
 ### 🔌 Flujo MCP - Google Calendar
 
-Usuario → Telegram → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → **MCP Server (puerto 8088)** → Google Calendar personal del usuario
+Usuario → Flask Web UI → Orchestrator → Scheduling Agent → CalendarSyncService → MCPCalendarProvider → **MCP Server (puerto 8088)** → Google Calendar personal del usuario
 
-La capa MCP se usa como transporte desacoplado para ejecutar las operaciones de calendario; el onboarding en Telegram captura el OAuth del usuario y lo asocia a su cuenta para que cada persona sincronice su propio calendario `primary`.
+La capa MCP se usa como transporte desacoplado para ejecutar las operaciones de calendario; el onboarding web captura el OAuth del usuario y lo asocia a su cuenta para que cada persona sincronice su propio calendario `primary`.
 
 **Componentes:**
 - **Servidor MCP** (`mcp_server/server.py`): JSON-RPC 2.0 sobre HTTP en puerto 8088
@@ -62,7 +58,7 @@ La capa MCP se usa como transporte desacoplado para ejecutar las operaciones de 
 1. **Mock Mode** (desarrollo/testing): Sin credenciales OAuth de Google, todas las operaciones simuladas
 2. **Production Mode** (producción): Con OAuth por usuario, sincronización real en el calendario personal `primary`
 
-El onboarding configura email, zona horaria y la conexión OAuth a Google Calendar desde Telegram. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
+El onboarding configura email, zona horaria y la conexión OAuth a Google Calendar desde la UI web. Si MCP no está disponible o falla, el sistema mantiene la operación local y registra el incidente en `History`.
 
 Este diseño evita un calendario compartido: la relación de credenciales se guarda por `user_id` y la sincronización se dispara solo para el usuario que autorizó su cuenta.
 
@@ -77,9 +73,8 @@ Este diseño evita un calendario compartido: la relación de credenciales se gua
 * ✅ Cancelar evento con confirmación
 
 ### 🔔 Sistema de Recordatorios Dual
-* ✅ Recordatorios por **Telegram** con mensajes formateados en Markdown
 * ✅ Recordatorios por **Email** con asuntos y cuerpos profesionales
-* ✅ Canales configurables: `telegram`, `email`, `both` (por defecto)
+* ✅ Canales configurables: `email`, `both`
 * ✅ Envío automático cada 60 segundos con zona horaria del usuario
 
 ### ☁️ Integración MCP / Google Calendar
@@ -95,11 +90,11 @@ Este diseño evita un calendario compartido: la relación de credenciales se gua
 * ✅ Mensajes informativos sobre conflictos encontrados
 * ✅ Re-agendamiento automático en el siguiente espacio disponible
 
-### 🎨 UX Telegram Moderna
-* ✅ Menú principal con botones inline interactivos
-* ✅ Navegación intuitiva sin comandos complejos
-* ✅ Mensajes naturales en español
-* ✅ Confirmaciones visuales y retroalimentación inmediata
+### 🎨 UX Web Moderna
+* ✅ Login y registro con OTP
+* ✅ Chat limpio con tonos morados
+* ✅ Grabación de audio para Whisper STT
+* ✅ Botón para escuchar respuestas mediante TTS local
 
 ### 🤖 IA Avanzada Integrada
 * ✅ Qwen 2.5 Instruct como modelo principal local
@@ -157,7 +152,7 @@ Este diseño evita un calendario compartido: la relación de credenciales se gua
 
 * ✅ **Python 3.13** - versión actualizada
 * ✅ **SQLite** - base de datos robusta con migraciones
-* ✅ **python-telegram-bot** - framework completo para bots
+* ✅ **Flask** - interfaz web local
 * ✅ **Qwen 2.5 Instruct** - modelo LLM local optimizado
 * ✅ **Ollama** - runtime local para IA
 * ✅ **SMTP** - sistema de correo electrónico
@@ -170,14 +165,17 @@ Variables de entorno implementadas:
 
 ```bash
 # Obligatorias
-TELEGRAM_BOT_TOKEN=your_token_here
-TELEGRAM_BOT_URL=https://t.me/uq_scheduler_bot
 SQLITE_PATH=scheduler.db
+RUN_WEB_APP=true
+WEB_HOST=127.0.0.1
+WEB_PORT=5000
+FLASK_SECRET_KEY=change-me
+APP_ENCRYPTION_KEY=change-me
 
 # Funcionalidades
 DEFAULT_REMINDER_MINUTES=15
 DEFAULT_TIMEZONE=America/Bogota
-RUN_TELEGRAM_BOT=true
+OTP_EXPIRATION_MINUTES=10
 
 # IA Local (Opcional pero recomendado)
 LLM_PROVIDER=ollama
@@ -213,7 +211,7 @@ GOOGLE_CALENDAR_ID=
 * ✅ **Confirmación obligatoria** para acciones críticas (crear, modificar, cancelar)
 * ✅ **Anti-solapamiento inteligente** con resolución automática
 * ✅ **No modificar eventos pasados** - validación estricta
-* ✅ **Recordatorios duales** - email + Telegram por defecto
+* ✅ **Recordatorios por email** y persistencia local por usuario
 * ✅ **Zona horaria por usuario** - soporte completo
 * ✅ **Mensajes naturales** - respuestas en español conversacional
 
@@ -257,22 +255,17 @@ Sistema de mensajes conversacionales en español:
 
 ---
 
-## 13. Telegram - INTEGRACIÓN COMPLETA
+## 13. Interfaz Web - INTEGRACIÓN COMPLETA
 
-**Comandos implementados:**
-- ✅ `/start` - Menú principal con botones
-- ✅ `/help` - Ayuda completa
-- ✅ `/agenda` - Ver agenda formateada
-- ✅ `/create` - Crear evento (con parsing inteligente)
-- ✅ `/update` - Modificar evento
-- ✅ `/cancel` - Cancelar evento
-- ✅ `/health` - Estado del sistema
-
-**UX Moderna:**
-- ✅ **Botones inline** para navegación intuitiva
-- ✅ **Callbacks** para acciones rápidas
-- ✅ **Text router** para procesamiento de texto libre
-- ✅ **Error handler** con logging automático
+**Rutas implementadas:**
+- ✅ `/register` - Registro con username, email y password
+- ✅ `/verify-otp` - Verificación de correo con OTP
+- ✅ `/login` - Inicio de sesión
+- ✅ `/` - Interfaz principal de chat
+- ✅ `/connect-google` - Enlace OAuth a Google Calendar
+- ✅ `/api/chat` - Mensajería al agente
+- ✅ `/api/stt` - Speech-to-text con Whisper
+- ✅ `/api/tts` - Síntesis de voz local
 
 ---
 
@@ -347,7 +340,7 @@ python mcp_server/test_integration.py -v
 # Terminal 1: Servidor MCP
 python mcp_server/run.py
 
-# Terminal 2: Bot Telegram
+# Terminal 2: App Web Flask
 python main.py
 ```
 - ✅ Manejo robusto de errores
@@ -367,17 +360,17 @@ python main.py
 * `/cancel id`
 * `/health`
 
-El arranque del polling se controla con `RUN_TELEGRAM_BOT=true`.
+El arranque de la interfaz se controla con `RUN_WEB_APP=true`.
 
 ## 14. Estado de Pruebas
 
-El proyecto está listo para una prueba funcional inicial en Telegram con comandos estructurados.
+El proyecto está listo para una prueba funcional inicial en la interfaz web con chat estructurado y voz.
 
 También incluye flujo conversacional por lenguaje natural con confirmación explícita.
 
 ### Checklist mínimo
 
-* Configurar `.env` con token y `RUN_TELEGRAM_BOT=true`
+* Configurar `.env` con `RUN_WEB_APP=true` y credenciales de Flask/OTP/OAuth
 * Instalar dependencias con `pip install -r requirements.txt`
 * Ejecutar `python main.py`
 
