@@ -28,14 +28,18 @@ sys.path.insert(0, project_root)
 from mcp_server.server import run_server
 
 if __name__ == "__main__":
+    host = "0.0.0.0"
     port = 8088
     service_account_file = None
     
     # Check environment variables
+    if "MCP_HOST" in os.environ:
+        host = os.environ["MCP_HOST"].strip() or "0.0.0.0"
+
     if "MCP_PORT" in os.environ:
         port = int(os.environ["MCP_PORT"])
     
     if "GOOGLE_SERVICE_ACCOUNT_FILE" in os.environ:
         service_account_file = os.environ["GOOGLE_SERVICE_ACCOUNT_FILE"]
     
-    run_server(port=port, service_account_file=service_account_file)
+    run_server(host=host, port=port, service_account_file=service_account_file)

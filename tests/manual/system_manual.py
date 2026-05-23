@@ -37,7 +37,7 @@ def test_database_operations():
         history_repo = HistoryRepository(connection)
 
         # Crear usuario
-        user = User(id=None, telegram_chat_id='test_123', email='test@example.com')
+        user = User(id=None, user_key='test_123', email='test@example.com')
         created_user = user_repo.upsert(user)
         print(f"✅ Usuario creado: ID={created_user.id}")
 
@@ -53,7 +53,7 @@ def test_database_operations():
             end_time=now + timedelta(hours=2),
             priority=3,
             status='scheduled',
-            source='telegram',
+            source='web',
             timezone='America/Bogota',
             confirmed=True,
             metadata={'test': 'data'},
@@ -65,7 +65,7 @@ def test_database_operations():
 
         # Verificar que se guardaron las nuevas columnas
         retrieved_event = event_repo.get_by_id(created_event.id)
-        assert retrieved_event.source == 'telegram'
+        assert retrieved_event.source == 'web'
         assert retrieved_event.timezone == 'America/Bogota'
         assert retrieved_event.confirmed == True
         assert retrieved_event.metadata == {'test': 'data'}
@@ -101,7 +101,7 @@ def test_database_operations():
             end_time=created_event.end_time,
             priority=5,
             status='scheduled',
-            source='telegram',
+            source='web',
             timezone='America/Bogota',
             confirmed=True,
             metadata={'updated': True},
@@ -159,7 +159,7 @@ def test_scheduler_service():
         )
 
         # Crear usuario
-        user = User(id=None, telegram_chat_id='service_test_123')
+        user = User(id=None, user_key='service_test_123')
         created_user = user_repo.upsert(user)
 
         # Probar creación de evento (usando repositorio directamente)
@@ -251,7 +251,7 @@ def test_reminder_channels():
 
         # Crear reminder con diferentes canales
         test_cases = [
-            ("telegram", "telegram"),
+            ("web", "web"),
             ("email", "email"),
             ("both", "both")
         ]
@@ -316,7 +316,7 @@ def test_mcp_calendar_integration():
         """
         CREATE TABLE users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            telegram_chat_id TEXT NOT NULL UNIQUE,
+            user_key TEXT NOT NULL UNIQUE,
             email TEXT,
             preferences TEXT NOT NULL DEFAULT '{}'
         );
@@ -330,7 +330,7 @@ def test_mcp_calendar_integration():
             end_time TEXT NOT NULL,
             priority INTEGER NOT NULL DEFAULT 3,
             status TEXT NOT NULL DEFAULT 'scheduled',
-            source TEXT NOT NULL DEFAULT 'telegram',
+            source TEXT NOT NULL DEFAULT 'web',
             timezone TEXT NOT NULL DEFAULT 'America/Bogota',
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
             updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -377,7 +377,7 @@ def test_mcp_calendar_integration():
         calendar_sync=sync_service,
     )
 
-    user = users.upsert(User(id=None, telegram_chat_id='mcp_123', email='mcp@example.com', preferences={'timezone': 'America/Bogota'}))
+    user = users.upsert(User(id=None, user_key='mcp_123', email='mcp@example.com', preferences={'timezone': 'America/Bogota'}))
     now = datetime.now()
     event = Event(
         id=None,
@@ -389,7 +389,7 @@ def test_mcp_calendar_integration():
         end_time=now + timedelta(hours=3),
         priority=3,
         status='scheduled',
-        source='telegram',
+        source='web',
         timezone='America/Bogota',
         confirmed=False,
         metadata={},
@@ -410,7 +410,7 @@ def test_mcp_calendar_integration():
         end_time=now + timedelta(hours=5),
         priority=3,
         status='scheduled',
-        source='telegram',
+        source='web',
         timezone='America/Bogota',
         confirmed=False,
         metadata={},

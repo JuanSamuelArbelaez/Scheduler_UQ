@@ -95,7 +95,7 @@ class CalendarMCPTests(unittest.TestCase):
             """
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_chat_id TEXT NOT NULL UNIQUE,
+                user_key TEXT NOT NULL UNIQUE,
                 email TEXT,
                 preferences TEXT NOT NULL DEFAULT '{}'
             );
@@ -116,7 +116,7 @@ class CalendarMCPTests(unittest.TestCase):
                 end_time TEXT NOT NULL,
                 priority INTEGER NOT NULL DEFAULT 3,
                 status TEXT NOT NULL DEFAULT 'scheduled',
-                source TEXT NOT NULL DEFAULT 'telegram',
+                source TEXT NOT NULL DEFAULT 'web',
                 timezone TEXT NOT NULL DEFAULT 'America/Bogota',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -155,7 +155,7 @@ class CalendarMCPTests(unittest.TestCase):
         self.user = self.users.upsert(
             User(
                 id=None,
-                telegram_chat_id="chat-1",
+                user_key="chat-1",
                 email="user@example.com",
                 preferences={"timezone": "America/Bogota"},
             )
@@ -253,7 +253,7 @@ class CalendarMCPTests(unittest.TestCase):
         user_without_email = self.users.upsert(
             User(
                 id=None,
-                telegram_chat_id="chat-no-email",
+                user_key="chat-no-email",
                 email=None,
                 preferences={"timezone": "America/Bogota"},
             )
@@ -318,6 +318,10 @@ class CalendarMCPTests(unittest.TestCase):
         cancel_result = scheduler.cancel_event(saved_event.id or 0)
         self.assertTrue(any(call[0] == "delete" for call in provider.calls))
         self.assertIn("Sincronización Google Calendar", cancel_result.message)
+
+        cancelled_event = self.events.get_by_id(saved_event.id or 0)
+        self.assertEqual(cancelled_event.status, "cancelled")
+        self.assertEqual(self.events.list_by_user(self.user.id or 0), [])
 
 
 if __name__ == "__main__":

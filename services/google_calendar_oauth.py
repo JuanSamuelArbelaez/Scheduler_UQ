@@ -8,8 +8,7 @@ import secrets
 import threading
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import parse_qs, urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.parse import parse_qs, urlparse
 
 from google_auth_oauthlib.flow import Flow
 
@@ -41,14 +40,12 @@ class GoogleCalendarOAuthManager:
         redirect_host: str = "127.0.0.1",
         redirect_port: int = 8765,
         scopes: str = "https://www.googleapis.com/auth/calendar",
-        telegram_bot_token: str | None = None,
     ) -> None:
         self.preferences = preferences
         self.client_secrets_file = Path(client_secrets_file)
         self.redirect_host = redirect_host
         self.redirect_port = redirect_port
         self.scopes = [scope.strip() for scope in scopes.split() if scope.strip()]
-        self.telegram_bot_token = telegram_bot_token
         self._pending_states: dict[str, _PendingOAuthSession] = {}
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -63,7 +60,7 @@ class GoogleCalendarOAuthManager:
     def has_connection(self, user: User) -> bool:
         return self.preferences.is_google_calendar_connected(user)
 
-    def build_authorization_url(self, user: User) -> str:
+    def build_authorization_url(self, user: User, force_account_selection: bool = False) -> str:
         if not self.is_configured():
             raise RuntimeError("Google OAuth no está configurado")
 
@@ -71,12 +68,12 @@ class GoogleCalendarOAuthManager:
         flow = self._build_flow(state)
         authorization_url, _ = flow.authorization_url(
             access_type="offline",
-            prompt="consent",
+            prompt="consent select_account" if force_account_selection else "consent",
             include_granted_scopes="true",
             state=state,
         )
         self._pending_states[state] = _PendingOAuthSession(
-            chat_id=user.telegram_chat_id,
+            chat_id=user.user_key,
             code_verifier=getattr(flow, "code_verifier", None),
         )
         return authorization_url
@@ -136,7 +133,6 @@ class GoogleCalendarOAuthManager:
             credentials = json.loads(flow.credentials.to_json())
             user = self.preferences.get_user(session.chat_id)
             self.preferences.update_google_calendar_credentials(user, credentials)
-            self._notify_telegram(session.chat_id, "Google Calendar quedó vinculado a tu calendario personal.")
             return GoogleOAuthResult(True, "Google Calendar conectado correctamente.", user_chat_id=session.chat_id)
         except Exception as error:
             logger.exception("No se pudo completar OAuth de Google Calendar")
@@ -149,33 +145,19 @@ class GoogleCalendarOAuthManager:
             return "⚠️ Aún no configuré el flujo de Google Calendar."
         return "🔗 Conecta Google Calendar una sola vez para usar tu calendario personal."
 
+    def disconnect(self, user: User) -> None:
+        self.preferences.clear_google_calendar_credentials(user)
+
     def _build_flow(self, state: str) -> Flow:
         flow = Flow.from_client_secrets_file(str(self.client_secrets_file), scopes=self.scopes, state=state)
         flow.redirect_uri = self.redirect_uri
         flow.autogenerate_code_verifier = True
         return flow
 
-    def _notify_telegram(self, chat_id: str, message: str) -> None:
-        if not self.telegram_bot_token:
-            return
-
-        body = urlencode({"chat_id": chat_id, "text": message}).encode("utf-8")
-        request = Request(
-            f"https://api.telegram.org/bot{self.telegram_bot_token}/sendMessage",
-            data=body,
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            method="POST",
-        )
-        try:
-            with urlopen(request, timeout=10):
-                return
-        except Exception:
-            logger.warning("No se pudo enviar notificación Telegram de OAuth")
-
     def _render_html_result(self, result: GoogleOAuthResult) -> bytes:
         title = "Conexión de Google Calendar"
         if result.success:
-            message = "La conexión quedó lista. Ya puedes volver a Telegram."
+            message = "La conexión quedó lista. Ya puedes volver a la interfaz web."
         else:
             message = result.message
         html = f"""
@@ -184,7 +166,7 @@ class GoogleCalendarOAuthManager:
           <body style=\"font-family: sans-serif; padding: 24px;\">
             <h2>{title}</h2>
             <p>{message}</p>
-            <p>Puedes cerrar esta pestaña y volver a Telegram.</p>
+                        <p>Puedes cerrar esta pestaña y volver a la aplicación.</p>
           </body>
         </html>
         """.strip()

@@ -8,7 +8,7 @@ from typing import Any
 @dataclass(slots=True)
 class User:
     id: int | None
-    telegram_chat_id: str
+    user_key: str
     email: str | None = None
     preferences: dict[str, Any] = field(default_factory=dict)
 
@@ -24,7 +24,7 @@ class Event:
     location: str | None = None
     priority: int = 3
     status: str = "scheduled"
-    source: str = "telegram"  # telegram, web, api
+    source: str = "web"  # web, api, scheduler
     timezone: str = "America/Bogota"
     created_at: datetime = field(default_factory=lambda: datetime.now())
     updated_at: datetime = field(default_factory=lambda: datetime.now())
@@ -38,7 +38,7 @@ class Reminder:
     id: int | None
     event_id: int
     remind_at: datetime
-    channel: str = "both"  # telegram, email, both
+    channel: str = "both"  # email, web, both
 
 
 @dataclass(slots=True)

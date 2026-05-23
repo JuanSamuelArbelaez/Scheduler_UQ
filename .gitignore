@@ -16,3 +16,4 @@ __pycache__/
 *.sqlite3
 credentials.json
 oauth_client_secret.json
+.continue/agents/new-config.yaml

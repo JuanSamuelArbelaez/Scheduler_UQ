@@ -1,0 +1,17 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+scheduler.db
+.env
+.env.*
+credentials.json
+oauth_client_secret.json
+telegram_log.txt
+__copilot_terminal_probe.txt
+.continue
+.vscode

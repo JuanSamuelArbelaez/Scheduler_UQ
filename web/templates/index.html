@@ -1,0 +1,83 @@
+{% extends 'base.html' %}
+{% block content %}
+<header class="topbar card">
+  <div>
+    <h1>Scheduler MCP Web</h1>
+    <p class="muted">Usuario: {{ user.preferences.get('username', 'N/A') }} | Zona horaria: {{ timezone }}</p>
+  </div>
+  <form method="post" action="{{ url_for('logout') }}">
+    <button class="secondary" type="submit">Cerrar sesión</button>
+  </form>
+</header>
+
+<section class="card onboarding">
+  <h2>Onboarding</h2>
+  {% if onboarding_missing %}
+    <p class="warning">{{ onboarding_missing }}</p>
+  {% else %}
+    <p class="ok">Onboarding completo.</p>
+  {% endif %}
+
+  <div class="actions-row">
+    <form method="post" action="{{ url_for('update_timezone') }}" class="inline-form">
+      <input name="timezone" placeholder="America/Bogota" required />
+      <button type="submit">Actualizar zona</button>
+    </form>
+
+    {% if oauth_configured %}
+      {% if google_connected %}
+        <span class="pill">Google Calendar conectado</span>
+        <a class="button-link" href="{{ url_for('connect_google') }}">Cambiar cuenta Google</a>
+        <form method="post" action="{{ url_for('disconnect_google') }}" class="inline-form">
+          <button class="secondary" type="submit">Desvincular</button>
+        </form>
+      {% else %}
+        <a class="button-link" href="{{ url_for('connect_google') }}">Conectar Google Calendar</a>
+      {% endif %}
+    {% else %}
+      <span class="warning">OAuth Google no configurado</span>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card chat-card">
+  <h2>Chat con el Agente</h2>
+  <div id="chatBox" class="chat-box">
+    {% for item in messages %}
+      <article class="bubble bubble-{{ item.role }}">
+        <p>{{ item.content }}</p>
+        {% if item.role == 'assistant' %}
+          <button class="listen-btn" data-text="{{ item.content|e }}">Escuchar</button>
+        {% endif %}
+      </article>
+    {% endfor %}
+  </div>
+
+  <div class="composer">
+    <input id="chatInput" type="text" placeholder="Escribe tu mensaje aquí..." />
+    <button id="sendBtn">Enviar</button>
+    <button id="recordBtn" class="secondary">Grabar Audio</button>
+  </div>
+
+  <div id="recorderPanel" class="recorder-panel hidden" aria-live="polite">
+    <div class="recorder-head">
+      <span id="recordingState" class="pill-rec">Grabando...</span>
+      <span id="recordingTimer" class="timer">00:00</span>
+    </div>
+
+    <canvas id="recordingWave" class="recording-wave" width="760" height="80"></canvas>
+
+    <div class="recorder-controls">
+      <button id="recPauseBtn" class="secondary" type="button">Pausar</button>
+      <button id="recResumeBtn" class="secondary" type="button" disabled>Continuar</button>
+      <button id="recPreviewBtn" class="secondary" type="button" disabled>Reproducir</button>
+      <button id="recSendBtn" type="button" disabled>Enviar audio</button>
+      <button id="recAbortBtn" class="secondary" type="button" disabled>Abortar</button>
+    </div>
+
+    <audio id="recPreviewAudio" class="recorder-preview hidden" controls preload="none"></audio>
+  </div>
+</section>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

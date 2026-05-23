@@ -1,0 +1,253 @@
+:root {
+  --bg: #f5efff;
+  --bg2: #e9ddff;
+  --card: #ffffff;
+  --text: #261a3c;
+  --muted: #6f5f8a;
+  --accent: #6d2ed1;
+  --accent-strong: #4f1ea0;
+  --danger: #b42345;
+  --ok: #17603b;
+  --warning: #8b5a13;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  background: radial-gradient(circle at 10% 10%, var(--bg2), var(--bg));
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.bg-shape {
+  position: fixed;
+  z-index: -1;
+  filter: blur(30px);
+  opacity: 0.45;
+}
+
+.bg-shape-a {
+  width: 260px;
+  height: 260px;
+  border-radius: 48% 52% 65% 35% / 42% 42% 58% 58%;
+  background: #b89cff;
+  top: 30px;
+  left: -80px;
+}
+
+.bg-shape-b {
+  width: 320px;
+  height: 320px;
+  border-radius: 64% 36% 45% 55% / 50% 44% 56% 50%;
+  background: #d8b9ff;
+  right: -120px;
+  bottom: -100px;
+}
+
+.container {
+  max-width: 980px;
+  margin: 24px auto;
+  padding: 0 14px 24px;
+}
+
+.card {
+  background: var(--card);
+  border-radius: 16px;
+  padding: 16px;
+  box-shadow: 0 14px 30px rgba(45, 15, 97, 0.11);
+  margin-bottom: 14px;
+}
+
+.auth-card {
+  max-width: 420px;
+  margin: 60px auto;
+}
+
+h1, h2 { margin-top: 0; }
+
+.stack {
+  display: grid;
+  gap: 8px;
+}
+
+input {
+  border: 1px solid #d8c8f8;
+  border-radius: 10px;
+  padding: 11px;
+  font-size: 15px;
+}
+
+button, .button-link {
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 14px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+}
+
+button:hover, .button-link:hover { background: var(--accent-strong); }
+
+button.secondary {
+  background: #e9d9ff;
+  color: var(--text);
+}
+
+button.secondary:hover { background: #dbc5ff; }
+
+.flash-list { display: grid; gap: 8px; margin-bottom: 10px; }
+.flash { padding: 10px; border-radius: 10px; }
+.flash-success { background: #daf5e5; color: var(--ok); }
+.flash-error { background: #ffe4ea; color: var(--danger); }
+
+.muted { color: var(--muted); }
+.warning { color: var(--warning); font-weight: 600; }
+.ok { color: var(--ok); font-weight: 600; }
+
+.topbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.chat-box {
+  border: 1px solid #ebdbff;
+  background: #fcf8ff;
+  border-radius: 14px;
+  min-height: 260px;
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.bubble {
+  max-width: 85%;
+  border-radius: 12px;
+  padding: 10px;
+  animation: fadeIn .2s ease-out;
+}
+
+.bubble-user {
+  margin-left: auto;
+  background: #dac2ff;
+}
+
+.bubble-assistant {
+  margin-right: auto;
+  background: #efe3ff;
+}
+
+.composer {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 8px;
+}
+
+.actions-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.inline-form {
+  display: flex;
+  gap: 8px;
+}
+
+.pill {
+  background: #e4f8ec;
+  color: var(--ok);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.listen-btn {
+  margin-top: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.tts-audio {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.recorder-panel {
+  margin-top: 10px;
+  border: 1px solid #dcc8ff;
+  background: #f9f2ff;
+  border-radius: 14px;
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.recorder-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.pill-rec {
+  background: #ffe0ea;
+  color: #9a1f45;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.timer {
+  font-family: "Consolas", "Courier New", monospace;
+  font-weight: 700;
+  color: #4e248e;
+}
+
+.recording-wave {
+  width: 100%;
+  height: 80px;
+  border-radius: 10px;
+  border: 1px solid #e4d5ff;
+  background: linear-gradient(180deg, #ffffff, #f2e8ff);
+}
+
+.recorder-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.recorder-controls button[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.recorder-preview {
+  width: 100%;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 720px) {
+  .composer { grid-template-columns: 1fr; }
+  .topbar { flex-direction: column; align-items: flex-start; }
+  .inline-form { width: 100%; }
+  .inline-form input { flex: 1; }
+}

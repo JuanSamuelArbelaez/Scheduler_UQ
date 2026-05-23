@@ -14,13 +14,13 @@ class UserPreferencesAgent:
         self.users = users
         self.default_timezone = default_timezone
 
-    def get_user(self, telegram_chat_id: str) -> User:
-        return self.users.get_by_chat_id(telegram_chat_id)
+    def get_user(self, user_key: str) -> User:
+        return self.users.get_by_user_key(user_key)
 
     def upsert_user(self, user: User) -> User:
         merged_preferences = dict(user.preferences)
         merged_preferences.setdefault("timezone", self.default_timezone)
-        return self.users.upsert(User(id=user.id, telegram_chat_id=user.telegram_chat_id, email=user.email, preferences=merged_preferences))
+        return self.users.upsert(User(id=user.id, user_key=user.user_key, email=user.email, preferences=merged_preferences))
 
     def update_email(self, user: User, email: str) -> User:
         preferences = dict(user.preferences)

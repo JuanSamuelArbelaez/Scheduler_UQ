@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<section class="card auth-card">
+  <h1>Registro</h1>
+  <form method="post" class="stack">
+    <label>Usuario</label>
+    <input name="username" required />
+    <label>Correo</label>
+    <input name="email" type="email" required />
+    <label>Contraseña</label>
+    <input name="password" type="password" required />
+    <button type="submit">Crear Cuenta</button>
+  </form>
+  <p class="muted">¿Ya tienes cuenta? <a href="{{ url_for('login') }}">Inicia sesión</a></p>
+</section>
+{% endblock %}
