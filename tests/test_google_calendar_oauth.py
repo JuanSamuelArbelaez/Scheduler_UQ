@@ -22,7 +22,7 @@ class GoogleCalendarOAuthTests(unittest.TestCase):
             """
             CREATE TABLE users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_chat_id TEXT NOT NULL UNIQUE,
+                user_key TEXT NOT NULL UNIQUE,
                 email TEXT,
                 preferences TEXT NOT NULL DEFAULT '{}'
             )
@@ -45,7 +45,7 @@ class GoogleCalendarOAuthTests(unittest.TestCase):
         self.user = self.users.upsert(
             User(
                 id=None,
-                telegram_chat_id="chat-oauth",
+                user_key="chat-oauth",
                 email="user@example.com",
                 preferences={"timezone": "America/Bogota"},
             )
@@ -100,7 +100,6 @@ class GoogleCalendarOAuthTests(unittest.TestCase):
         manager = GoogleCalendarOAuthManager(
             self.preferences,
             client_secrets_file=str(client_secrets),
-            telegram_bot_token=None,
         )
 
         auth_url = manager.build_authorization_url(self.user)
@@ -109,7 +108,7 @@ class GoogleCalendarOAuthTests(unittest.TestCase):
         pending_state = next(iter(manager._pending_states))
         result = manager.complete_authorization(pending_state, "auth-code")
         self.assertTrue(result.success)
-        self.assertTrue(self.preferences.is_google_calendar_connected(self.preferences.get_user(self.user.telegram_chat_id)))
+        self.assertTrue(self.preferences.is_google_calendar_connected(self.preferences.get_user(self.user.user_key)))
 
 
 if __name__ == "__main__":

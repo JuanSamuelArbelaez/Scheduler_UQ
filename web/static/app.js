@@ -38,11 +38,37 @@ function appendSystemMessage(text) {
 }
 
 async function parseErrorResponse(response) {
+  const contentType = response.headers.get("content-type") || "";
   try {
-    const payload = await response.json();
-    return payload.message || "Ocurrió un error en el servidor.";
+    if (contentType.includes("application/json")) {
+      const payload = await response.json();
+      return payload.message || `Error HTTP ${response.status}`;
+    }
+    const rawText = await response.text();
+    if (!rawText) {
+      return `Error HTTP ${response.status}`;
+    }
+    return rawText.slice(0, 240);
   } catch (_) {
     return `Error HTTP ${response.status}`;
+  }
+}
+
+async function parseJsonSafe(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    return {
+      ok: false,
+      message: await parseErrorResponse(response),
+    };
+  }
+  try {
+    return await response.json();
+  } catch (_) {
+    return {
+      ok: false,
+      message: `Respuesta JSON inválida (HTTP ${response.status})`,
+    };
   }
 }
 
@@ -194,19 +220,26 @@ async function sendMessage() {
     appendBubble("user", message);
     chatInput.value = "";
 
+    sendBtn.disabled = true;
+
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ message }),
     });
-    const payload = await response.json();
+    const payload = await parseJsonSafe(response);
     if (!payload.ok) {
       appendBubble("assistant", payload.message || "No se pudo procesar tu mensaje.");
       return;
     }
     appendBubble("assistant", payload.reply);
   } catch (error) {
-    appendSystemMessage(`No se pudo enviar el mensaje: ${error?.message || "error desconocido"}`);
+    const detail = error?.message || "error desconocido";
+    appendSystemMessage(
+      `No se pudo enviar el mensaje (${detail}). Verifica que la web esté en http://127.0.0.1:5000 y vuelve a iniciar sesión.`
+    );
+  } finally {
+    sendBtn.disabled = false;
   }
 }
 
@@ -586,15 +619,7 @@ async function sendRecordedAudio() {
       body: formData,
     });
 
-    let sttPayload;
-    try {
-      sttPayload = await sttResponse.json();
-    } catch (_) {
-      sttPayload = {
-        ok: false,
-        message: `Respuesta no valida del servidor (HTTP ${sttResponse.status})`,
-      };
-    }
+    const sttPayload = await parseJsonSafe(sttResponse);
 
     if (!sttPayload.ok) {
       appendBubble("assistant", sttPayload.message || "No se pudo procesar el audio.");

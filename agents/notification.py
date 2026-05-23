@@ -49,8 +49,8 @@ class NotificationAgent:
             day_events = events_by_date[event_date]
             day_events.sort(key=lambda x: x[0])  # Ordenar por hora
 
-            # Nombre del día
-            today = date.today()
+            # Nombre del día basado en la zona horaria del usuario, no del servidor.
+            today = datetime.now(self._safe_timezone(timezone_name)).date()
             if event_date == today:
                 day_name = "Hoy"
             elif event_date == today + timedelta(days=1):

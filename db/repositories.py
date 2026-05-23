@@ -249,7 +249,7 @@ class EventRepository:
 
     def list_by_user(self, user_id: int) -> list[Event]:
         rows = self.connection.execute(
-            "SELECT * FROM events WHERE user_id = ? ORDER BY start_time ASC",
+            "SELECT * FROM events WHERE user_id = ? AND status != 'cancelled' ORDER BY start_time ASC",
             (user_id,),
         ).fetchall()
         return [self._row_to_event(row) for row in rows]

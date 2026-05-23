@@ -4,7 +4,6 @@ from db.repositories import EventRepository, ReminderRepository, UserRepository
 from models.entities import Event, Reminder
 from services.scheduler_service import ActionResult, SchedulerService
 from services.email_service import EmailService
-from services.telegram_service import TelegramService
 from services.calendar_sync_service import CalendarSyncService
 
 from .history import HistoryAgent
@@ -20,7 +19,6 @@ class SchedulingAgent:
         reminders: ReminderRepository,
         users: UserRepository,
         email_service: EmailService,
-        telegram_service: TelegramService | None = None,
         history: HistoryAgent | None = None,
         calendar_sync: CalendarSyncService | None = None,
         default_timezone: str = "America/Bogota",
@@ -34,7 +32,6 @@ class SchedulingAgent:
             users,
             self.notification,
             email_service,
-            telegram_service,
             history=history,
             calendar_sync=calendar_sync,
             default_timezone=default_timezone,

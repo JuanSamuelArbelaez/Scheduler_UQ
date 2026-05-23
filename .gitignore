@@ -16,5 +16,4 @@ __pycache__/
 *.sqlite3
 credentials.json
 oauth_client_secret.json
-WHISPER_README.md
 .continue/agents/new-config.yaml

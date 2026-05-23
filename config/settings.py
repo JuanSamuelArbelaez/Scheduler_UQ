@@ -13,6 +13,7 @@ class AppSettings:
     llm_provider: str = "none"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = ""
+    speech_service_url: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_username: str = ""
@@ -54,6 +55,7 @@ def load_settings() -> AppSettings:
     llm_provider = os.getenv("LLM_PROVIDER", "none").strip().lower()
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").strip()
     ollama_model = os.getenv("OLLAMA_MODEL", "").strip()
+    speech_service_url = os.getenv("SPEECH_SERVICE_URL", "").strip()
     smtp_host = os.getenv("SMTP_HOST", "").strip()
     smtp_port = int(os.getenv("SMTP_PORT", "587"))
     smtp_username = os.getenv("SMTP_USERNAME", "").strip()
@@ -95,6 +97,7 @@ def load_settings() -> AppSettings:
         llm_provider=llm_provider,
         ollama_base_url=ollama_base_url,
         ollama_model=ollama_model,
+        speech_service_url=speech_service_url,
         smtp_host=smtp_host,
         smtp_port=smtp_port,
         smtp_username=smtp_username,

@@ -17,8 +17,6 @@ from agents.scheduling import SchedulingAgent
 from db.repositories import ChatRepository, UserRepository
 from models.entities import User
 from services.google_calendar_oauth import GoogleCalendarOAuthManager
-from services.speech_to_text_service import SpeechToTextService
-from services.text_to_speech_service import TextToSpeechService
 from services.web_auth_service import WebAuthService
 from services.web_chat_service import WebChatService
 
@@ -33,8 +31,8 @@ class WebDependencies:
     oauth_manager: GoogleCalendarOAuthManager | None
     auth_service: WebAuthService
     chat_repository: ChatRepository
-    stt_service: SpeechToTextService
-    tts_service: TextToSpeechService
+    stt_service: Any
+    tts_service: Any
     default_timezone: str
 
 

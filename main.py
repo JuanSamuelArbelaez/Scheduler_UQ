@@ -23,6 +23,7 @@ from services.email_service import EmailService, EmailSettings
 from services.google_calendar_oauth import GoogleCalendarOAuthManager
 from services.local_llm import LocalOllamaClient
 from services.providers.mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider
+from services.remote_speech_service import RemoteSpeechToTextService, RemoteTextToSpeechService
 from services.speech_to_text_service import SpeechToTextService
 from services.text_to_speech_service import TextToSpeechService
 from services.web_auth_service import WebAuthService
@@ -100,8 +101,12 @@ def build_application() -> dict[str, object]:
 		default_timezone=settings.default_timezone,
 		otp_expiration_minutes=settings.otp_expiration_minutes,
 	)
-	stt_service = SpeechToTextService(model_name=settings.whisper_model)
-	tts_service = TextToSpeechService(provider=settings.tts_provider, model_name=settings.tts_model_name)
+	if settings.speech_service_url:
+		stt_service = RemoteSpeechToTextService(settings.speech_service_url)
+		tts_service = RemoteTextToSpeechService(settings.speech_service_url)
+	else:
+		stt_service = SpeechToTextService(model_name=settings.whisper_model)
+		tts_service = TextToSpeechService(provider=settings.tts_provider, model_name=settings.tts_model_name)
 	oauth_manager = GoogleCalendarOAuthManager(
 		preferences_agent,
 		client_secrets_file=settings.google_oauth_client_secrets_file,
@@ -222,14 +227,12 @@ def main() -> None:
 		llm_client = application["agents"]["llm_client"]
 		if llm_client is None:
 			print("LLM_PROVIDER=ollama, pero no se pudo construir el cliente local.")
-			print("Deteniendo inicio para evitar comportamiento inconsistente del Intent Agent.")
-			return
-
-		ready, message = llm_client.ensure_ready()
-		print(f"Verificación Ollama: {message}")
-		if not ready:
-			print("Deteniendo inicio hasta que Ollama esté operativo y con el modelo configurado.")
-			return
+			print("Continuando con fallback de reglas locales mientras se resuelve el proveedor.")
+		else:
+			ready, message = llm_client.ensure_ready()
+			print(f"Verificación Ollama: {message}")
+			if not ready:
+				print("Ollama no está listo todavía; el agente de intención usará fallback local hasta que responda.")
 
 	if settings.run_web_app:
 		web_app = application["web_app"]

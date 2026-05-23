@@ -9,7 +9,6 @@ from db.repositories import EventRepository, ReminderRepository, UserRepository
 from models.entities import Event, Reminder
 from agents.notification import NotificationAgent
 from services.email_service import EmailService
-from services.telegram_service import TelegramService
 from services.calendar_sync_service import CalendarSyncService
 from agents.history import HistoryAgent
 
@@ -29,7 +28,6 @@ class SchedulerService:
         users: UserRepository,
         notification: NotificationAgent,
         email_service: EmailService,
-        telegram_service: TelegramService | None = None,
         history: HistoryAgent | None = None,
         calendar_sync: CalendarSyncService | None = None,
         default_timezone: str = "America/Bogota",
@@ -40,7 +38,6 @@ class SchedulerService:
         self.users = users
         self.notification = notification
         self.email_service = email_service
-        self.telegram_service = telegram_service
         self.history = history
         self.calendar_sync = calendar_sync
         self.default_timezone = default_timezone
@@ -158,7 +155,6 @@ class SchedulerService:
             event_title = str(row["event_title"])
             event_start_time = row["event_start_time"]
             user_email = str(row.get("user_email") or "").strip()
-            user_telegram_chat_id = str(row.get("user_telegram_chat_id") or "").strip()
             user_preferences = row.get("user_preferences") or {}
             timezone_name = str(user_preferences.get("timezone") or self.default_timezone)
 
@@ -186,15 +182,6 @@ class SchedulerService:
                     timezone_name
                 )
                 sent = self.email_service.send_email(user_email, subject, body) or sent
-
-            # Enviar por Telegram si el canal lo requiere y tenemos chat_id
-            if channel in ["telegram", "both"] and user_telegram_chat_id and self.telegram_service:
-                sent = self.telegram_service.send_reminder_sync(
-                    chat_id=user_telegram_chat_id,
-                    event_title=event_title,
-                    event_time=time_str,
-                    timezone=timezone_name
-                ) or sent
 
             # Marcar como enviado si al menos un canal tuvo éxito
             delivery_status = "sent" if sent else "failed"
@@ -326,7 +313,8 @@ class SchedulerService:
             return ""
 
         if outcome.success:
-            self._attach_external_calendar_id(event, outcome.result.external_id)
+            if action in {"create", "update"}:
+                self._attach_external_calendar_id(event, outcome.result.external_id)
             return "Sincronización Google Calendar solicitada vía MCP."
         return "Sincronización Google Calendar no disponible; mantuve el guardado local."
 
