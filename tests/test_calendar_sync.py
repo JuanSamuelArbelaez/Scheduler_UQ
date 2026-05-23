@@ -10,30 +10,26 @@ from db.repositories import EventRepository, HistoryRepository, ReminderReposito
 from models.entities import Event, User
 from services.calendar_sync_service import CalendarSyncService
 from services.email_service import EmailService, EmailSettings
-from services.providers.calendar_provider import CalendarCapabilitySnapshot, CalendarProvider, CalendarSyncResult, CalendarTransport
-from services.providers.mcp_calendar_provider import MCPCalendarProvider
+from services.providers.calendar_provider import CalendarCapabilitySnapshot, CalendarProvider, CalendarSyncResult
+from services.providers.google_calendar_provider import GoogleCalendarProvider
 from services.scheduler_service import SchedulerService
 
 
-class FakeTransport(CalendarTransport):
+class FakeGoogleCalendarService:
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, object]]] = []
 
-    def is_available(self) -> bool:
+    def create_event(self, **kwargs):
+        self.calls.append(("create", kwargs))
+        return {"id": "ext-create-1"}
+
+    def update_event(self, **kwargs):
+        self.calls.append(("update", kwargs))
+        return {"id": kwargs.get("event_id", "ext-update-1")}
+
+    def delete_event(self, **kwargs):
+        self.calls.append(("delete", kwargs))
         return True
-
-    def list_tools(self) -> dict[str, object]:
-        return {"tools": [{"name": "google_calendar.create_event"}, {"name": "google_calendar.update_event"}, {"name": "google_calendar.delete_event"}]}
-
-    def list_templates(self) -> dict[str, object]:
-        return {"prompts": [{"name": "calendar-event-template"}]}
-
-    def list_resources(self) -> dict[str, object]:
-        return {"resources": [{"uri": "google-calendar://primary"}]}
-
-    def call_tool(self, tool_name: str, arguments: dict[str, object]) -> dict[str, object]:
-        self.calls.append((tool_name, arguments))
-        return {"content": [{"text": f"ok:{tool_name}"}], "external_id": f"ext-{len(self.calls)}"}
 
 
 class FakeProvider(CalendarProvider):
@@ -87,7 +83,7 @@ class FakeProvider(CalendarProvider):
         )
 
 
-class CalendarMCPTests(unittest.TestCase):
+class CalendarSyncTests(unittest.TestCase):
     def setUp(self) -> None:
         self.connection = sqlite3.connect(":memory:")
         self.connection.row_factory = sqlite3.Row
@@ -97,6 +93,8 @@ class CalendarMCPTests(unittest.TestCase):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_key TEXT NOT NULL UNIQUE,
                 email TEXT,
+                username TEXT,
+                email_verified INTEGER NOT NULL DEFAULT 0,
                 preferences TEXT NOT NULL DEFAULT '{}'
             );
             CREATE TABLE google_calendar_credentials (
@@ -164,9 +162,9 @@ class CalendarMCPTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.connection.close()
 
-    def test_mcp_provider_exposes_tools_templates_and_data_sources(self) -> None:
-        transport = FakeTransport()
-        provider = MCPCalendarProvider(transport, default_calendar_id="calendar@example.com")
+    def test_google_provider_exposes_capabilities_and_payload(self) -> None:
+        calendar_service = FakeGoogleCalendarService()
+        provider = GoogleCalendarProvider(calendar_service, default_calendar_id="calendar@example.com")
 
         self.assertTrue(provider.is_available())
         capabilities = provider.describe_capabilities()
@@ -177,7 +175,7 @@ class CalendarMCPTests(unittest.TestCase):
         event = Event(
             id=None,
             user_id=self.user.id or 0,
-            title="Reunión MCP",
+            title="Reunión Google",
             start_time=datetime.now() + timedelta(hours=2),
             end_time=datetime.now() + timedelta(hours=3),
             description="demo",
@@ -185,15 +183,15 @@ class CalendarMCPTests(unittest.TestCase):
         )
         result = provider.create_event(event, self.user)
         self.assertTrue(result.success)
-        self.assertEqual(transport.calls[0][0], "google_calendar.create_event")
-        self.assertEqual(transport.calls[0][1]["calendar_id"], "calendar@example.com")
-        self.assertEqual(transport.calls[0][1]["title"], "Reunión MCP")
-        self.assertIn("start_time_utc", transport.calls[0][1])
-        self.assertIn("end_time_utc", transport.calls[0][1])
+        self.assertEqual(calendar_service.calls[0][0], "create")
+        self.assertEqual(calendar_service.calls[0][1]["calendar_id"], "calendar@example.com")
+        self.assertEqual(calendar_service.calls[0][1]["title"], "Reunión Google")
+        self.assertIn("start_time_utc", calendar_service.calls[0][1])
+        self.assertIn("end_time_utc", calendar_service.calls[0][1])
 
-    def test_mcp_provider_includes_user_oauth_credentials(self) -> None:
-        transport = FakeTransport()
-        provider = MCPCalendarProvider(transport, default_calendar_id="primary")
+    def test_google_provider_includes_user_oauth_credentials(self) -> None:
+        calendar_service = FakeGoogleCalendarService()
+        provider = GoogleCalendarProvider(calendar_service, default_calendar_id="primary")
         self.users.set_google_calendar_credentials(
             self.user.id or 0,
             {
@@ -219,8 +217,8 @@ class CalendarMCPTests(unittest.TestCase):
 
         result = provider.create_event(event, connected_user)
         self.assertTrue(result.success)
-        self.assertIn("oauth_credentials", transport.calls[0][1])
-        self.assertEqual(transport.calls[0][1]["oauth_credentials"]["token"], "token-value")
+        self.assertIn("oauth_credentials", calendar_service.calls[0][1])
+        self.assertEqual(calendar_service.calls[0][1]["oauth_credentials"]["token"], "token-value")
 
     def test_calendar_sync_service_falls_back_locally_and_logs_history(self) -> None:
         provider = FakeProvider()

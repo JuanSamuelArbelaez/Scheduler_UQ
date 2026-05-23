@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import os
-import socket
-import threading
-import time
 from typing import Any
 
 from agents.confirmation import ConfirmationAgent
@@ -20,9 +17,10 @@ from db.database import Database
 from db.repositories import ChatRepository, EventRepository, HistoryRepository, OTPRepository, ReminderRepository, UserRepository
 from services.calendar_sync_service import CalendarSyncService
 from services.email_service import EmailService, EmailSettings
+from services.google_calendar_service import GoogleCalendarService
 from services.google_calendar_oauth import GoogleCalendarOAuthManager
 from services.local_llm import LocalOllamaClient
-from services.providers.mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider
+from services.providers.google_calendar_provider import GoogleCalendarProvider
 from services.remote_speech_service import RemoteSpeechToTextService, RemoteTextToSpeechService
 from services.speech_to_text_service import SpeechToTextService
 from services.text_to_speech_service import TextToSpeechService
@@ -55,19 +53,17 @@ def build_application() -> dict[str, object]:
 	notification_agent = NotificationAgent()
 	calendar_provider = None
 	calendar_sync_service = None
-	if settings.mcp_enabled and settings.mcp_http_endpoint:
-		transport = HttpJsonRpcMCPTransport(settings.mcp_http_endpoint, timeout_seconds=settings.mcp_timeout_seconds)
-		calendar_provider = MCPCalendarProvider(
-			transport,
-			create_tool=settings.mcp_google_calendar_create_tool,
-			update_tool=settings.mcp_google_calendar_update_tool,
-			delete_tool=settings.mcp_google_calendar_delete_tool,
-			list_tools_method=settings.mcp_list_tools_method,
-			list_templates_method=settings.mcp_list_templates_method,
-			list_resources_method=settings.mcp_list_resources_method,
-			default_calendar_id=settings.google_calendar_calendar_id,
+	if settings.google_calendar_sync_enabled:
+		google_calendar_service = GoogleCalendarService(settings.google_service_account_file)
+		calendar_provider = GoogleCalendarProvider(
+			google_calendar_service,
+			default_calendar_id=settings.google_calendar_calendar_id or "primary",
 		)
-		calendar_sync_service = CalendarSyncService(calendar_provider, history=None, retry_count=settings.mcp_retry_count)
+		calendar_sync_service = CalendarSyncService(
+			calendar_provider,
+			history=None,
+			retry_count=settings.google_calendar_retry_count,
+		)
 	orchestrator_agent = OrchestratorAgent(nlp_agent, intent_agent, priority_agent, confirmation_agent, calendar_provider=calendar_provider)
 	email_service = EmailService(
 		EmailSettings(
@@ -175,45 +171,6 @@ def run_internal_health_check(application: dict[str, Any]) -> tuple[bool, str]:
 
 	return True, "db ok"
 
-
-def _is_tcp_port_open(host: str, port: int) -> bool:
-	try:
-		with socket.create_connection((host, port), timeout=1):
-			return True
-	except OSError:
-		return False
-
-
-def _start_mcp_server_thread(settings: Any) -> None:
-	"""Start the MCP calendar server in a background daemon thread."""
-	import urllib.parse as _urlparse
-	parsed = _urlparse.urlparse(settings.mcp_http_endpoint)
-	host = parsed.hostname or "localhost"
-	port = parsed.port or 8088
-	service_account_file = os.getenv("GOOGLE_SERVICE_ACCOUNT_FILE", "").strip() or None
-	local_hosts = {"localhost", "127.0.0.1", "::1"}
-	if host not in local_hosts:
-		print(f"MCP externo configurado en {settings.mcp_http_endpoint}; no inicio MCP embebido.")
-		return
-
-	if _is_tcp_port_open(host, port):
-		print(f"MCP server ya disponible en http://{host}:{port}/mcp")
-		return
-
-	def _run() -> None:
-		try:
-			from mcp_server.server import run_server
-			run_server(host=host, port=port, service_account_file=service_account_file)
-		except Exception as exc:
-			print(f"MCP server error: {exc}")
-
-	thread = threading.Thread(target=_run, name="mcp-server", daemon=True)
-	thread.start()
-	# Give the server a moment to bind before Flask starts accepting requests
-	time.sleep(1.5)
-	print(f"MCP server iniciado en http://{host}:{port}/mcp")
-
-
 def main() -> None:
 	application = build_application()
 	settings = application["settings"]
@@ -236,8 +193,6 @@ def main() -> None:
 
 	if settings.run_web_app:
 		web_app = application["web_app"]
-		if settings.mcp_enabled and settings.mcp_http_endpoint:
-			_start_mcp_server_thread(settings)
 		print(f"Iniciando Flask app en http://{settings.web_host}:{settings.web_port}")
 		web_app.run(host=settings.web_host, port=settings.web_port, debug=False)
 		return

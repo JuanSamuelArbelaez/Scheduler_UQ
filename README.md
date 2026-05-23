@@ -3,7 +3,7 @@
 Scheduler UQ es un asistente de agenda local-first con:
 - Aplicación web Flask con autenticación + OTP
 - Agendamiento por lenguaje natural en español
-- Sincronización con Google Calendar vía MCP
+- Sincronización directa con Google Calendar
 - Pipeline de voz (STT + TTS)
 - Soporte para Ollama/Qwen
 
@@ -11,7 +11,6 @@ Scheduler UQ es un asistente de agenda local-first con:
 
 El proyecto corre con servicios separados usando Docker Compose:
 - `web`: Flask UI/API (`:5000`)
-- `mcp`: puente MCP para Google Calendar (`:8088` interno)
 - `speech`: servicio HTTP de STT/TTS (`:8090` interno)
 - `ollama`: runtime local del LLM (`:11434` interno)
 
@@ -19,7 +18,7 @@ El proyecto corre con servicios separados usando Docker Compose:
 
 - El flujo runtime de Telegram fue eliminado.
 - La web es el canal principal de usuario.
-- La sincronización de calendario ocurre mediante el provider MCP.
+- La sincronización de calendario ocurre mediante provider directo de Google Calendar.
 - El listado de agenda excluye eventos cancelados.
 - La cancelación ya no revierte el estado del evento tras el delete sync.
 - La normalización de TTS mejoró para fechas, horas y siglas.

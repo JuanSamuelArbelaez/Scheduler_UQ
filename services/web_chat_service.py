@@ -52,7 +52,7 @@ class WebChatService:
             if not self.oauth_manager.is_configured():
                 return "Google OAuth aún no está configurado en el entorno."
             if not self.oauth_manager.has_connection(user):
-                return "Conecta Google Calendar para continuar usando la agenda con MCP."
+                return "Conecta Google Calendar para continuar usando la agenda sincronizada."
         return None
 
     def apply_preference_text(self, user: User, text: str) -> User | None:

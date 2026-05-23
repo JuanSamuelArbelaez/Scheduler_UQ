@@ -12,10 +12,9 @@ services:
       FLASK_SECRET_KEY: "${FLASK_SECRET_KEY:-}"
       APP_ENCRYPTION_KEY: "${APP_ENCRYPTION_KEY:-}"
       SQLITE_PATH: "/data/scheduler.db"
-      MCP_ENABLED: "true"
-      MCP_HTTP_ENDPOINT: "http://mcp:8088/mcp"
-      MCP_TIMEOUT_SECONDS: "15"
-      MCP_RETRY_COUNT: "2"
+      GOOGLE_CALENDAR_SYNC_ENABLED: "${GOOGLE_CALENDAR_SYNC_ENABLED:-true}"
+      GOOGLE_CALENDAR_SYNC_RETRY_COUNT: "${GOOGLE_CALENDAR_SYNC_RETRY_COUNT:-2}"
+      GOOGLE_CALENDAR_ID: "${GOOGLE_CALENDAR_ID:-primary}"
       LLM_PROVIDER: "${LLM_PROVIDER:-ollama}"
       OLLAMA_BASE_URL: "http://ollama:11434"
       OLLAMA_MODEL: "${OLLAMA_MODEL:-qwen2.5:7b-instruct}"
@@ -37,34 +36,10 @@ services:
       - ./credentials.json:/app/credentials.json:ro
       - ./oauth_client_secret.json:/app/oauth_client_secret.json:ro
     depends_on:
-      mcp:
-        condition: service_healthy
       speech:
         condition: service_started
       ollama:
         condition: service_started
-
-  mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile.app
-    container_name: scheduler-mcp
-    restart: unless-stopped
-    command: ["python", "-m", "mcp_server.run"]
-    environment:
-      MCP_HOST: "0.0.0.0"
-      MCP_PORT: "8088"
-      GOOGLE_SERVICE_ACCOUNT_FILE: "/app/credentials.json"
-    expose:
-      - "8088"
-    volumes:
-      - ./credentials.json:/app/credentials.json:ro
-    healthcheck:
-      test: ["CMD", "python", "-c", "import json,urllib.request; req=urllib.request.Request('http://127.0.0.1:8088/mcp', data=json.dumps({'jsonrpc':'2.0','id':1,'method':'tools/list'}).encode('utf-8'), headers={'Content-Type':'application/json'}, method='POST'); urllib.request.urlopen(req, timeout=5).read()"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
 
   speech:
     build:

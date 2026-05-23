@@ -13,14 +13,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.app.txt ./requirements.app.txt
-COPY mcp_server/requirements.txt ./mcp_server/requirements.txt
 
 RUN python -m pip install --upgrade "pip<25" "setuptools<81" wheel \
-    && pip install -r requirements.app.txt \
-    && pip install -r mcp_server/requirements.txt
+    && pip install -r requirements.app.txt
 
 COPY . .
 
-EXPOSE 5000 8088
+EXPOSE 5000
 
 CMD ["python", "main.py"]

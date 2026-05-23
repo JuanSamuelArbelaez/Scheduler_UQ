@@ -1,5 +1,5 @@
 from .calendar_provider import CalendarCapabilitySnapshot, CalendarProvider, CalendarSyncResult, CalendarTransport, NoopCalendarProvider
-from .mcp_calendar_provider import HttpJsonRpcMCPTransport, MCPCalendarProvider, MCPTransportError
+from .google_calendar_provider import GoogleCalendarProvider
 
 __all__ = [
     "CalendarCapabilitySnapshot",
@@ -7,7 +7,5 @@ __all__ = [
     "CalendarSyncResult",
     "CalendarTransport",
     "NoopCalendarProvider",
-    "HttpJsonRpcMCPTransport",
-    "MCPCalendarProvider",
-    "MCPTransportError",
+    "GoogleCalendarProvider",
 ]

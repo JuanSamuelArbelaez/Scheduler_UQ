@@ -315,7 +315,7 @@ class SchedulerService:
         if outcome.success:
             if action in {"create", "update"}:
                 self._attach_external_calendar_id(event, outcome.result.external_id)
-            return "Sincronización Google Calendar solicitada vía MCP."
+            return "Sincronización Google Calendar aplicada correctamente."
         return "Sincronización Google Calendar no disponible; mantuve el guardado local."
 
     def _attach_external_calendar_id(self, event: Event, external_id: str | None) -> None:

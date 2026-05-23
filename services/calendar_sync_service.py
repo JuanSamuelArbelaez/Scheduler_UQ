@@ -46,7 +46,7 @@ class CalendarSyncService:
         try:
             return self.provider.describe_capabilities()
         except Exception as error:
-            logger.warning("No se pudieron obtener capacidades MCP: %s", error)
+            logger.warning("No se pudieron obtener capacidades de calendario: %s", error)
             return CalendarCapabilitySnapshot()
 
     def sync_create(self, event: Event, user: User) -> CalendarSyncOutcome:
@@ -60,7 +60,7 @@ class CalendarSyncService:
 
     def _sync(self, action: str, event: Event, user: User) -> CalendarSyncOutcome:
         if not self.provider.is_available():
-            result = self._fallback_result(action, event, user, "MCP deshabilitado")
+            result = self._fallback_result(action, event, user, "sincronización externa deshabilitada")
             self._record_history(action, event, user, result)
             return CalendarSyncOutcome(result=result, retries=0)
 
@@ -72,12 +72,12 @@ class CalendarSyncService:
                     self._record_history(action, event, user, result)
                     return CalendarSyncOutcome(result=result, retries=attempt)
                 last_error = RuntimeError(result.message)
-                logger.warning("MCP intento %s falló para %s: %s", attempt + 1, action, result.message)
+                logger.warning("Sync intento %s falló para %s: %s", attempt + 1, action, result.message)
             except Exception as error:
                 last_error = error
-                logger.warning("MCP intento %s lanzó error para %s: %s", attempt + 1, action, error)
+                logger.warning("Sync intento %s lanzó error para %s: %s", attempt + 1, action, error)
 
-        result = self._fallback_result(action, event, user, str(last_error) if last_error else "MCP no disponible")
+        result = self._fallback_result(action, event, user, str(last_error) if last_error else "sincronización externa no disponible")
         self._record_history(action, event, user, result)
         return CalendarSyncOutcome(result=result, retries=self.retry_count)
 
@@ -126,7 +126,7 @@ class CalendarSyncService:
         try:
             self.history.record(user.id or 0, history_action, event.id, json.dumps(details, ensure_ascii=False))
         except Exception as error:
-            logger.warning("No se pudo registrar historial de sincronización MCP: %s", error)
+            logger.warning("No se pudo registrar historial de sincronización de calendario: %s", error)
 
     def _redact_sensitive_payload(self, payload: dict[str, object]) -> dict[str, object]:
         def scrub(value: object) -> object:

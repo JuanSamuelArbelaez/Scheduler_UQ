@@ -270,9 +270,9 @@ def test_reminder_channels():
 
     print("✅ Sistema de recordatorios multi-canal funciona correctamente")
 
-def test_mcp_calendar_integration():
-    """Prueba la integración MCP con sincronización local y fallback"""
-    print("\n=== PRUEBA: Integración MCP / Google Calendar ===")
+def test_google_calendar_sync_integration():
+    """Prueba la integración directa con Google Calendar y fallback local"""
+    print("\n=== PRUEBA: Integración directa Google Calendar ===")
 
     import sqlite3
 
@@ -283,7 +283,7 @@ def test_mcp_calendar_integration():
     from services.scheduler_service import SchedulerService
 
     class FakeProvider(CalendarProvider):
-        name = "fake-mcp"
+        name = "fake-google"
 
         def __init__(self) -> None:
             self.available = True
@@ -377,12 +377,12 @@ def test_mcp_calendar_integration():
         calendar_sync=sync_service,
     )
 
-    user = users.upsert(User(id=None, user_key='mcp_123', email='mcp@example.com', preferences={'timezone': 'America/Bogota'}))
+    user = users.upsert(User(id=None, user_key='google_123', email='google@example.com', preferences={'timezone': 'America/Bogota'}))
     now = datetime.now()
     event = Event(
         id=None,
         user_id=user.id,
-        title='Reunión MCP',
+        title='Reunión Google',
         description='demo',
         location='online',
         start_time=now + timedelta(hours=2),
@@ -398,12 +398,12 @@ def test_mcp_calendar_integration():
 
     created = scheduler.create_event_with_conflict_resolution(event)
     assert created.event is not None
-    print("✅ Create sincroniza con MCP")
+    print("✅ Create sincroniza con Google Calendar")
 
     updated = Event(
         id=created.event.id,
         user_id=user.id,
-        title='Reunión MCP actualizada',
+        title='Reunión Google actualizada',
         description='demo 2',
         location='online',
         start_time=now + timedelta(hours=4),
@@ -419,14 +419,14 @@ def test_mcp_calendar_integration():
     scheduler.update_event(updated)
     scheduler.cancel_event(created.event.id)
     assert [call[0] for call in provider.calls] == ['create', 'update', 'delete']
-    print("✅ Update / delete sincronizan con MCP")
+    print("✅ Update / delete sincronizan con Google Calendar")
 
     rows = connection.execute("SELECT action FROM history ORDER BY id DESC LIMIT 3").fetchall()
     assert rows
-    print("✅ Historial registra sincronizaciones MCP")
+    print("✅ Historial registra sincronizaciones de Google Calendar")
 
     connection.close()
-    print("✅ Integración MCP / Google Calendar funciona correctamente")
+    print("✅ Integración directa con Google Calendar funciona correctamente")
 
 def test_full_system():
     """Prueba el sistema completo iniciando el bot"""
@@ -457,7 +457,7 @@ def run_all_tests():
         test_database_operations()
         test_scheduler_service()
         test_reminder_channels()
-        test_mcp_calendar_integration()
+        test_google_calendar_sync_integration()
         test_llm_integration()
         test_full_system()
 

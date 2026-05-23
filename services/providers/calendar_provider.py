@@ -85,13 +85,13 @@ class NoopCalendarProvider(CalendarProvider):
         return CalendarCapabilitySnapshot()
 
     def create_event(self, event: Event, user: User) -> CalendarSyncResult:
-        return self._build_result("create", event, user, "Proveedor MCP no configurado")
+        return self._build_result("create", event, user, "Proveedor de calendario no configurado")
 
     def update_event(self, event: Event, user: User) -> CalendarSyncResult:
-        return self._build_result("update", event, user, "Proveedor MCP no configurado")
+        return self._build_result("update", event, user, "Proveedor de calendario no configurado")
 
     def delete_event(self, event: Event, user: User) -> CalendarSyncResult:
-        return self._build_result("delete", event, user, "Proveedor MCP no configurado")
+        return self._build_result("delete", event, user, "Proveedor de calendario no configurado")
 
     def _build_result(self, action: str, event: Event, user: User, message: str) -> CalendarSyncResult:
         payload = {

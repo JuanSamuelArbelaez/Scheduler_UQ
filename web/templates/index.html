@@ -2,7 +2,7 @@
 {% block content %}
 <header class="topbar card">
   <div>
-    <h1>Scheduler MCP Web</h1>
+    <h1>Scheduler Web</h1>
     <p class="muted">Usuario: {{ user.preferences.get('username', 'N/A') }} | Zona horaria: {{ timezone }}</p>
   </div>
   <form method="post" action="{{ url_for('logout') }}">
