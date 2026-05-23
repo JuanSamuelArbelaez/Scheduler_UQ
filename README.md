@@ -1,90 +1,90 @@
 # Scheduler UQ
 
-Scheduler UQ is a local-first agenda assistant with:
-- Flask web app with auth + OTP
-- Natural language scheduling in Spanish
-- Google Calendar sync via MCP
-- Speech pipeline (STT + TTS)
-- Ollama/Qwen support
+Scheduler UQ es un asistente de agenda local-first con:
+- Aplicación web Flask con autenticación + OTP
+- Agendamiento por lenguaje natural en español
+- Sincronización con Google Calendar vía MCP
+- Pipeline de voz (STT + TTS)
+- Soporte para Ollama/Qwen
 
-## Current Architecture
+## Arquitectura Actual
 
-The project runs in split services with Docker Compose:
+El proyecto corre con servicios separados usando Docker Compose:
 - `web`: Flask UI/API (`:5000`)
-- `mcp`: MCP bridge for Google Calendar (`:8088` internal)
-- `speech`: STT/TTS HTTP service (`:8090` internal)
-- `ollama`: local LLM runtime (`:11434` internal)
+- `mcp`: puente MCP para Google Calendar (`:8088` interno)
+- `speech`: servicio HTTP de STT/TTS (`:8090` interno)
+- `ollama`: runtime local del LLM (`:11434` interno)
 
-## Current State
+## Estado Actual
 
-- Telegram runtime flow removed.
-- Web app is the main user channel.
-- Calendar sync happens through MCP provider.
-- Agenda listing excludes cancelled events.
-- Cancellation no longer reverts event status after delete sync.
-- TTS normalization improved for dates, times, and acronyms.
+- El flujo runtime de Telegram fue eliminado.
+- La web es el canal principal de usuario.
+- La sincronización de calendario ocurre mediante el provider MCP.
+- El listado de agenda excluye eventos cancelados.
+- La cancelación ya no revierte el estado del evento tras el delete sync.
+- La normalización de TTS mejoró para fechas, horas y siglas.
 
-## New Setup (Clean Clone)
+## Nuevo Setup (Clon Limpio)
 
-A new contributor will not have secrets or local DB by default.
+Un nuevo colaborador no tendrá secretos ni base de datos local por defecto.
 
-Expected missing local files on first run:
-- `.env` (must be created from `.env.example`)
-- `credentials.json` (Google service account, optional depending on flow)
-- `oauth_client_secret.json` (Google OAuth client)
-- `scheduler.db` (created at runtime)
+Archivos locales que normalmente faltan en el primer arranque:
+- `.env` (debe crearse desde `.env.example`)
+- `credentials.json` (service account de Google, opcional según el flujo)
+- `oauth_client_secret.json` (cliente OAuth de Google)
+- `scheduler.db` (se crea en runtime)
 
-### 1) Configure environment
+### 1) Configurar entorno
 
 ```bash
 cp .env.example .env
 ```
 
-On Windows PowerShell:
+En Windows PowerShell:
 
 ```powershell
 Copy-Item .env.example .env
 ```
 
-### 2) Create Google JSON files from templates
+### 2) Crear archivos JSON de Google desde plantillas
 
 - `credentials.example.json` -> `credentials.json`
 - `oauth_client_secret.example.json` -> `oauth_client_secret.json`
 
-Fill them with your Google Cloud credentials.
+Completa estos archivos con tus credenciales de Google Cloud.
 
-### 3) Start the stack
+### 3) Levantar el stack
 
 ```bash
 docker compose up -d --build
 ```
 
-### 4) Open app
+### 4) Abrir la app
 
 - http://127.0.0.1:5000
 
-## Secrets and Docker
+## Secretos y Docker
 
-Secrets in `.env` are injected into containers as runtime environment variables.
-They are not baked into images unless copied explicitly during image build.
+Los secretos en `.env` se inyectan a los contenedores como variables de entorno en runtime.
+No quedan embebidos en las imágenes, salvo que se copien explícitamente durante el build.
 
-Important:
-- Do not commit `.env`, `credentials.json`, `oauth_client_secret.json`.
-- Users with Docker host access can inspect container env values.
-- For stricter security, use Docker secrets or an external secret manager.
+Importante:
+- No hagas commit de `.env`, `credentials.json`, `oauth_client_secret.json`.
+- Usuarios con acceso al host de Docker pueden inspeccionar variables de entorno del contenedor.
+- Para mayor seguridad, usa Docker secrets o un secret manager externo.
 
-## Tests
+## Pruebas
 
-Automated suite:
+Suite automatizada:
 
 ```bash
 python run_tests.py
 ```
 
-Manual/integration script:
+Script manual/de integración:
 - `tests/manual/system_manual.py`
 
-Recommendation:
-- Keep tests, do not delete them.
-- Keep fast unit tests in `tests/`.
-- Keep long/manual scenarios in `tests/manual/`.
+Recomendación:
+- Mantén los tests, no los borres.
+- Mantén los unit tests rápidos en `tests/`.
+- Mantén escenarios largos/manuales en `tests/manual/`.
